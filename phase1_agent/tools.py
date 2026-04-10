@@ -51,11 +51,11 @@ class TavilySearch:
             return []
 
 class FirecrawlScrape:
-    """Tool 2: Scrape webpage content"""
+    """Tool 2: Scrape webpage content with fallback to search snippets"""
     
     @staticmethod
-    def scrape(url: str) -> Optional[ScrapedContent]:
-        """Scrape URL using Firecrawl"""
+    def scrape(url: str, fallback_snippet: str = "") -> Optional[ScrapedContent]:
+        """Scrape URL using Firecrawl, fallback to snippet if blocked"""
         if not FIRECRAWL_API_KEY:
             raise ValueError("FIRECRAWL_API_KEY not set in .env")
         
@@ -85,11 +85,38 @@ class FirecrawlScrape:
                 print(f"[SCRAPE DONE] Got {len(content.content)} characters")
                 return content
             else:
-                print(f"[SCRAPE FAILED] {data.get('error', 'Unknown error')}")
+                print(f"[SCRAPE BLOCKED] Using snippet fallback")
+                if fallback_snippet:
+                    content = ScrapedContent(
+                        url=url,
+                        title="",
+                        content=fallback_snippet,
+                        timestamp=datetime.now().isoformat()
+                    )
+                    return content
                 return None
                 
+        except requests.exceptions.HTTPError as e:
+            print(f"[SCRAPE BLOCKED] {e.response.status_code} - Using snippet fallback")
+            if fallback_snippet:
+                content = ScrapedContent(
+                    url=url,
+                    title="",
+                    content=fallback_snippet,
+                    timestamp=datetime.now().isoformat()
+                )
+                return content
+            return None
         except requests.exceptions.RequestException as e:
-            print(f"[SCRAPE ERROR] {str(e)}")
+            print(f"[SCRAPE ERROR] {str(e)} - Using snippet fallback")
+            if fallback_snippet:
+                content = ScrapedContent(
+                    url=url,
+                    title="",
+                    content=fallback_snippet,
+                    timestamp=datetime.now().isoformat()
+                )
+                return content
             return None
 
 class FileSave:

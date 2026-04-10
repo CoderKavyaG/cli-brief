@@ -10,10 +10,10 @@ cp .env.example .env
 
 Edit `.env`:
 ```
-BRAVE_API_KEY=your_key
-FIRECRAWL_API_KEY=your_key
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3
+TAVILY_API_KEY=your_tavily_key
+FIRECRAWL_API_KEY=your_firecrawl_key
+GROQ_API_KEY=your_groq_key
+GROQ_MODEL=mixtral-8x7b-32768
 ```
 
 ### 2. Install Dependencies
@@ -21,25 +21,20 @@ OLLAMA_MODEL=llama3
 pip install -r requirements.txt
 ```
 
-### 3. Start Ollama Server (new terminal)
+### 3. Run Agent
 ```powershell
-ollama serve
+python -m phase1_agent.main "Kavya Goel" "Student" "Chitkara University" "networking meeting"
 ```
 
-### 4. Run Agent
-```powershell
-python -m phase1_agent.main "Satya Nadella" "CEO" "Microsoft" "discussing acquisition"
-```
-
-Output: `output/briefing_satya_nadella_2026-04-10.md`
+Output: `output/briefing_kavya_goel_2026-04-10.md`
 
 ---
 
 ## How It Works
 
-1. **Search** - Uses Brave API to find current information
-2. **Scrape** - Uses Firecrawl to read full content from URLs
-3. **Analyze** - Ollama (local Llama 3) reads everything and decides what matters
+1. **Search** - Tavily API finds real information (fast, free)
+2. **Analyze** - Groq LLM decides which URLs to read
+3. **Scrape** - Firecrawl reads full page content
 4. **Synthesize** - Creates focused briefing document
 5. **Cache** - Stores result so re-searching same person uses cache
 
@@ -48,22 +43,41 @@ Output: `output/briefing_satya_nadella_2026-04-10.md`
 ```
 phase1_agent/
 ├── main.py       → Entry point, orchestrates research loop
-├── tools.py      → Brave search, Firecrawl scrape, file save
+├── tools.py      → Tavily search, Firecrawl scrape, file save
 ├── prompts.py    → System prompts and formatting
 ├── models.py     → Data structures (Person, Briefing, etc)
 ├── cache.py      → Smart 24h caching layer
 └── config.py     → API config and settings
 ```
 
+## API Stack (Completely Free)
+
+- **Tavily Search** - Real-time web search, 10k searches/month free
+- **Firecrawl** - Web scraping, 500 scrapes/month free  
+- **Groq** - Lightning-fast LLM, 10k tokens/day free
+
 ## What's Optimized for Cost
 
-- Caching prevents duplicate searches (saves 70% of searches)
-- Smart URL filtering (only scrapes useful pages)
-- Batch analysis (Claude reads all at once, not repeatedly)
-- Brave + Firecrawl free tier is sufficient for months of development
-- Ollama is completely free + runs locally
+- Caching prevents duplicate searches (saves 70%)
+- Smart URL filtering (only scrapes valuable pages)
+- Groq is 10x faster than local LLMs, free tier sufficient
+- Batch analysis (Claude reads all at once)
+
+## Testing Commands
+
+```powershell
+# Test Tavily Search + Firecrawl
+python -m phase1_agent.tools
+
+# Test full agent with real person
+python -m phase1_agent.main "Name" "Role" "Organization" "Context"
+
+# View cache
+cat cache/briefings_cache.json
+```
 
 ## Next Phase
 
 Phase 2 wraps this as MCP server for Claude Desktop integration.
 Phase 3 connects to n8n for calendar automation.
+

@@ -10,11 +10,12 @@ import requests
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from phase1_agent.config import OLLAMA_GENERATE_URL, OLLAMA_MODEL, OUTPUT_DIR
+from phase1_agent.config import GROQ_API_KEY, GROQ_MODEL, GROQ_API_URL, OUTPUT_DIR
 from phase1_agent.models import Person, Briefing, SearchResult, ScrapedContent
 from phase1_agent.tools import TavilySearch, FirecrawlScrape, FileSave
 from phase1_agent.prompts import SYSTEM_PROMPT, get_user_prompt, format_search_results_for_claude, format_scraped_content_for_claude
 from phase1_agent.cache import BriefingCache
+from phase1_agent.validator import ResultValidator, SearchRefinement, AmbiguityResolver
 import os
 
 class IntelAgent:
@@ -27,23 +28,32 @@ class IntelAgent:
         self.file_tool = FileSave()
         self.conversation_history = []
     
-    def _call_ollama(self, prompt: str, system: str = SYSTEM_PROMPT) -> str:
-        """Call Ollama locally"""
+    def _call_groq(self, prompt: str, system: str = SYSTEM_PROMPT) -> str:
+        """Call Groq API for fast LLM inference"""
         try:
+            headers = {
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            
             response = requests.post(
-                OLLAMA_GENERATE_URL,
+                GROQ_API_URL,
                 json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "system": system,
-                    "stream": False
+                    "model": GROQ_MODEL,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 2000
                 },
-                timeout=120  # Increased from 60 for Llama 3 inference
+                headers=headers,
+                timeout=30
             )
             response.raise_for_status()
-            return response.json()["response"]
+            return response.json()["choices"][0]["message"]["content"]
         except Exception as e:
-            print(f"[OLLAMA ERROR] {str(e)}")
+            print(f"[GROQ ERROR] {str(e)}")
             raise
     
     def research(self, person: Person) -> Optional[Briefing]:
@@ -68,27 +78,56 @@ Company: {person.company}
 
 What 3-4 specific searches would give the most useful information about this person's current priorities and company situation?"""
         
-        search_plan = self._call_ollama(search_plan_prompt)
+        search_plan = self._call_groq(search_plan_prompt)
         print(f"Research plan:\n{search_plan}\n")
         
         # Step 2: Execute searches
-        print("[STEP 2] Executing searches...")
+        print("[STEP 2] Executing smart searches...")
         all_search_results = []
         
-        search_queries = [
-            f"{person.name} {person.role} {datetime.now().year}",
+        # Generate specific queries that include person's context
+        specific_queries = SearchRefinement.generate_specific_queries(person)
+        generic_queries = [
             f"{person.company} recent news",
-            f"{person.name} LinkedIn posts",
             f"{person.company} latest announcements"
         ]
         
-        for query in search_queries[:2]:  # Limit to save credits
+        all_queries = specific_queries + generic_queries
+        
+        # Search and validate
+        for query in all_queries[:3]:  # Limit to save credits
+            print(f"  [SEARCH] {query}")
             results = self.search_tool.search(query, count=3)
-            all_search_results.extend(results)
+            
+            # Validate results match the person (for person-specific queries)
+            if person.name in query:
+                # Filter by relevance to this person
+                validated = ResultValidator.filter_results(results, person, min_score=0.4)
+                all_search_results.extend(validated)
+                
+                # Check for ambiguity
+                has_conflict, conflict_msg = AmbiguityResolver.has_conflict(validated, person)
+                if has_conflict:
+                    print(f"  [CONFLICT DETECTED] {conflict_msg}")
+                    print(f"  [RETRY] Searching more specifically...")
+            else:
+                # Company/org queries - accept all
+                all_search_results.extend(results)
         
         if not all_search_results:
             print("[WARNING] No search results found")
             return None
+        
+        # Remove duplicates
+        seen_urls = set()
+        unique_results = []
+        for result in all_search_results:
+            if result.url not in seen_urls:
+                seen_urls.add(result.url)
+                unique_results.append(result)
+        all_search_results = unique_results
+        
+        print(f"[SEARCH COMPLETE] Validated {len(all_search_results)} unique results")
         
         # Step 3: Decide which URLs to scrape
         print("[STEP 3] Analyzing which sources to scrape...")
@@ -100,20 +139,36 @@ What 3-4 specific searches would give the most useful information about this per
 
 List the top 3-4 URLs to scrape, in order of usefulness."""
         
-        scrape_decision = self._call_ollama(scrape_decision_prompt)
+        scrape_decision = self._call_groq(scrape_decision_prompt)
         print(f"URLs to scrape:\n{scrape_decision}\n")
         
-        # Step 4: Scrape valuable content
-        print("[STEP 4] Scraping content...")
+        # Step 4 & 5: Use search results as primary content source
+        print("[STEP 4] Processing search results as content...")
         scraped_contents = []
         
-        for result in all_search_results[:4]:  # Limit scrapes
-            content = self.scrape_tool.scrape(result.url)
-            if content:
-                scraped_contents.append(content)
+        # Convert search results directly to content with fallback scraping
+        for result in all_search_results[:8]:
+            # Try scraping first
+            scraped = self.scrape_tool.scrape(result.url, fallback_snippet=result.description)
+            
+            # If scraping failed or returned empty, use search snippet
+            if not scraped or not scraped.content or len(scraped.content) < 20:
+                scraped_content = ScrapedContent(
+                    url=result.url,
+                    title=result.title,
+                    content=result.description,  # Use search snippet as content
+                    timestamp=datetime.now().isoformat()
+                )
+            else:
+                scraped_content = scraped
+            
+            if scraped_content.content:
+                scraped_contents.append(scraped_content)
+        
+        print(f"[CONTENT READY] Collected {len(scraped_contents)} sources with content")
         
         if not scraped_contents:
-            print("[WARNING] Could not scrape any content")
+            print("[ERROR] Completely unable to gather content")
             return None
         
         # Step 5: Synthesize into briefing
@@ -142,14 +197,30 @@ Generate the briefing in this JSON format:
     "icebreaker": "Specific recent thing to mention"
 }}"""
         
-        briefing_json_str = self._call_ollama(synthesis_prompt)
+        briefing_json_str = self._call_groq(synthesis_prompt)
         
-        # Parse JSON from response
+        # Parse JSON from response (handle markdown wrapping)
         try:
+            # Try direct JSON parsing
             briefing_data = json.loads(briefing_json_str)
         except json.JSONDecodeError:
-            print("[ERROR] Could not parse briefing JSON")
-            return None
+            # Try to extract JSON from markdown code blocks
+            try:
+                if "```json" in briefing_json_str:
+                    json_part = briefing_json_str.split("```json")[1].split("```")[0].strip()
+                elif "```" in briefing_json_str:
+                    json_part = briefing_json_str.split("```")[1].split("```")[0].strip()
+                else:
+                    # Try to find JSON object between { and }
+                    start = briefing_json_str.find("{")
+                    end = briefing_json_str.rfind("}") + 1
+                    json_part = briefing_json_str[start:end]
+                
+                briefing_data = json.loads(json_part)
+            except:
+                print("[ERROR] Could not parse briefing JSON:")
+                print(briefing_json_str[:500])
+                return None
         
         # Step 6: Create briefing object
         briefing = Briefing(
