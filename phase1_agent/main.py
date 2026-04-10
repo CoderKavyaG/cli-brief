@@ -68,7 +68,12 @@ class IntelAgent:
         # Check cache first
         cached = self.cache.get(person.name, person.role)
         if cached:
-            briefing = Briefing(**cached)
+            # Reconstruct Person and Briefing objects from cached dict
+            person_dict = cached.get('person', {})
+            person_obj = Person(**person_dict) if person_dict else person
+            
+            briefing_data = {k: v for k, v in cached.items() if k != 'person'}
+            briefing = Briefing(person=person_obj, **briefing_data)
             return briefing
         
         # Step 1: Initial research query
