@@ -16,6 +16,8 @@ from phase1_agent.tools import TavilySearch, FirecrawlScrape, FileSave
 from phase1_agent.prompts import SYSTEM_PROMPT, get_user_prompt, format_search_results_for_claude, format_scraped_content_for_claude
 from phase1_agent.cache import BriefingCache
 from phase1_agent.validator import ResultValidator, SearchRefinement, AmbiguityResolver
+from phase1_agent.recovery import RetryStrategy, SearchRecovery, ContentRecovery
+from phase1_agent.quality import BriefingValidator, BriefingRepair
 import os
 
 class IntelAgent:
@@ -236,8 +238,63 @@ Generate the briefing in this JSON format:
             timestamp=datetime.now().isoformat()
         )
         
-        # Step 7: Save briefing
-        print("[STEP 6] Saving briefing...")
+        # Step 7: Validate briefing quality
+        print("[STEP 7] Validating briefing quality...")
+        is_valid, issues = BriefingValidator.validate_briefing(briefing)
+        quality_score = BriefingValidator.get_quality_score(briefing)
+        print(f"[QUALITY] Score: {quality_score:.0f}/100")
+        
+        # If quality too low, attempt to improve
+        should_retry, retry_reason = BriefingValidator.should_retry(briefing, min_quality=65.0)
+        
+        if should_retry and len(all_search_results) >= 4:
+            print(f"[RETRY NEEDED] {retry_reason}")
+            print("[ATTEMPTING RECOVERY] Re-synthesizing with expanded context...")
+            
+            # Gather more detailed context
+            extended_context = "Additional guidance:\n"
+            for issue in issues[:3]:
+                extended_context += f"- {issue}\n"
+            
+            retry_synthesis_prompt = synthesis_prompt + f"\n\nIMPORTANT: {extended_context}"
+            retry_json_str = self._call_groq(retry_synthesis_prompt)
+            
+            try:
+                if "```json" in retry_json_str:
+                    json_part = retry_json_str.split("```json")[1].split("```")[0].strip()
+                elif "```" in retry_json_str:
+                    json_part = retry_json_str.split("```")[1].split("```")[0].strip()
+                else:
+                    start = retry_json_str.find("{")
+                    end = retry_json_str.rfind("}") + 1
+                    json_part = retry_json_str[start:end]
+                
+                retry_data = json.loads(json_part)
+                
+                # Create new briefing with retry data
+                briefing = Briefing(
+                    person=person,
+                    who_they_are=retry_data.get("who_they_are", briefing.who_they_are),
+                    what_they_care_about=retry_data.get("what_they_care_about", briefing.what_they_care_about),
+                    company_situation=retry_data.get("company_situation", briefing.company_situation),
+                    meeting_approach=retry_data.get("meeting_approach", briefing.meeting_approach),
+                    smart_questions=retry_data.get("smart_questions", briefing.smart_questions),
+                    things_to_avoid=retry_data.get("things_to_avoid", briefing.things_to_avoid),
+                    icebreaker=retry_data.get("icebreaker", briefing.icebreaker),
+                    sources=briefing.sources,
+                    timestamp=datetime.now().isoformat()
+                )
+                
+                # Validate again
+                is_valid, issues = BriefingValidator.validate_briefing(briefing)
+                quality_score = BriefingValidator.get_quality_score(briefing)
+                print(f"[RECOVERY] New quality score: {quality_score:.0f}/100")
+                
+            except:
+                print("[RECOVERY FAILED] Using original briefing")
+        
+        # Step 8: Save briefing
+        print("[STEP 8] Saving briefing...")
         filename = f"briefing_{person.name.replace(' ', '_').lower()}_{datetime.now().strftime('%Y-%m-%d')}.md"
         markdown = briefing.to_markdown()
         self.file_tool.save_briefing(filename, markdown, OUTPUT_DIR)
