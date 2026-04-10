@@ -12,7 +12,7 @@ from typing import Optional, List, Dict, Any
 
 from phase1_agent.config import OLLAMA_GENERATE_URL, OLLAMA_MODEL, OUTPUT_DIR
 from phase1_agent.models import Person, Briefing, SearchResult, ScrapedContent
-from phase1_agent.tools import BraveSearch, FirecrawlScrape, FileSave
+from phase1_agent.tools import TavilySearch, FirecrawlScrape, FileSave
 from phase1_agent.prompts import SYSTEM_PROMPT, get_user_prompt, format_search_results_for_claude, format_scraped_content_for_claude
 from phase1_agent.cache import BriefingCache
 import os
@@ -22,7 +22,7 @@ class IntelAgent:
     
     def __init__(self):
         self.cache = BriefingCache()
-        self.search_tool = BraveSearch()
+        self.search_tool = TavilySearch()
         self.scrape_tool = FirecrawlScrape()
         self.file_tool = FileSave()
         self.conversation_history = []

@@ -2,46 +2,43 @@ import requests
 import json
 from typing import List, Optional, Dict, Any
 from phase1_agent.config import (
-    BRAVE_API_KEY, FIRECRAWL_API_KEY, BRAVE_SEARCH_URL, FIRECRAWL_SCRAPE_URL,
+    TAVILY_API_KEY, FIRECRAWL_API_KEY, TAVILY_SEARCH_URL, FIRECRAWL_SCRAPE_URL,
     MAX_SEARCHES, SEARCH_TIMEOUT, SCRAPE_TIMEOUT
 )
 from phase1_agent.models import SearchResult, ScrapedContent
 from datetime import datetime
 
-class BraveSearch:
-    """Tool 1: Search the web using Brave API"""
+class TavilySearch:
+    """Tool 1: Search the web using Tavily API (free, no credit card)"""
     
     @staticmethod
     def search(query: str, count: int = MAX_SEARCHES) -> List[SearchResult]:
-        """Search using Brave API"""
-        if not BRAVE_API_KEY:
-            raise ValueError("BRAVE_API_KEY not set in .env")
+        """Search using Tavily API"""
+        if not TAVILY_API_KEY:
+            raise ValueError("TAVILY_API_KEY not set in .env")
         
-        headers = {
-            "Accept": "application/json",
-            "X-Subscription-Token": BRAVE_API_KEY
-        }
-        
-        params = {
-            "q": query,
-            "count": count
+        payload = {
+            "api_key": TAVILY_API_KEY,
+            "query": query,
+            "max_results": count,
+            "include_answer": True
         }
         
         try:
             print(f"[SEARCH] Query: {query}")
-            response = requests.get(BRAVE_SEARCH_URL, headers=headers, params=params, timeout=SEARCH_TIMEOUT)
+            response = requests.post(TAVILY_SEARCH_URL, json=payload, timeout=SEARCH_TIMEOUT)
             response.raise_for_status()
             
             data = response.json()
             results = []
             
-            if "web" in data:
-                for item in data["web"][:count]:
+            if "results" in data:
+                for item in data["results"][:count]:
                     result = SearchResult(
                         title=item.get("title", ""),
                         url=item.get("url", ""),
-                        description=item.get("description", ""),
-                        source="Brave Search"
+                        description=item.get("content", ""),
+                        source="Tavily Search"
                     )
                     results.append(result)
                     print(f"  → {result.title[:60]}... ({result.url})")

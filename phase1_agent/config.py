@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # API Configuration
-BRAVE_API_KEY = os.getenv("BRAVE_API_KEY")
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY")
 
 # Ollama Configuration
@@ -16,7 +16,7 @@ CACHE_DIR = "cache"
 OUTPUT_DIR = "output"
 
 # API Endpoints
-BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
+TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v0/scrape"
 OLLAMA_GENERATE_URL = f"{OLLAMA_BASE_URL}/api/generate"
 
