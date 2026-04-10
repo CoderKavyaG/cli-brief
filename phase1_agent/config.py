@@ -24,4 +24,4 @@ OLLAMA_GENERATE_URL = f"{OLLAMA_BASE_URL}/api/generate"
 MAX_SEARCHES = 5
 MAX_SCRAPES = 8
 SEARCH_TIMEOUT = 10
-SCRAPE_TIMEOUT = 15
+SCRAPE_TIMEOUT = 30  # Firecrawl can be slow, increased from 15

@@ -38,7 +38,7 @@ class IntelAgent:
                     "system": system,
                     "stream": False
                 },
-                timeout=60
+                timeout=120  # Increased from 60 for Llama 3 inference
             )
             response.raise_for_status()
             return response.json()["response"]
