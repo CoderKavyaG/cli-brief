@@ -119,8 +119,53 @@ class FirecrawlScrape:
                 return content
             return None
 
+class LinkExtractor:
+    """Tool 3: Extract social media & personal links from content"""
+    
+    import re
+    
+    PATTERNS = {
+        "linkedin": r"https?://(?:www\.)?(?:linkedin\.com|in\.linkedin\.com)/(?:in|company|showcase)/([a-z0-9\-]+)",
+        "twitter": r"https?://(?:x\.com|twitter\.com)/(@?[\w]+)",
+        "instagram": r"https?://(?:www\.)?instagram\.com/([a-z0-9\._\-]+)",
+        "github": r"https?://github\.com/([a-z0-9\-]+)",
+        "facebook": r"https?://(?:www\.)?facebook\.com/([a-z0-9\.\-]+)",
+        "tiktok": r"https?://(?:www\.)?tiktok\.com/@([\w\.]+)",
+        "website": r"https?://(?:www\.)?([a-z0-9\-]+\.(?:com|io|org|net|co|dev|me|blog|site))",
+        "email": r"\b([a-z0-9\._\-]+@[a-z0-9\._\-]+\.[a-z]+)\b"
+    }
+    
+    @staticmethod
+    def extract_from_text(text: str) -> Dict[str, List[str]]:
+        """Extract all social & contact links from text"""
+        results = {}
+        
+        for platform, pattern in LinkExtractor.PATTERNS.items():
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            if matches:
+                results[platform] = list(set(matches))  # Remove duplicates
+        
+        return results
+    
+    @staticmethod
+    def extract_from_snippet(snippet: str) -> Dict[str, List[str]]:
+        """Extract from search result snippet"""
+        return LinkExtractor.extract_from_text(snippet)
+    
+    @staticmethod
+    def format_links(extracted: Dict[str, List[str]]) -> str:
+        """Format extracted links nicely"""
+        output = ""
+        
+        for platform, values in extracted.items():
+            if values:
+                output += f"\n**{platform.capitalize()}**: {', '.join(values)}"
+        
+        return output
+
+
 class FileSave:
-    """Tool 3: Save files to disk"""
+    """Tool 4: Save files to disk"""
     
     @staticmethod
     def save_briefing(filename: str, content: str, directory: str = "output") -> str:

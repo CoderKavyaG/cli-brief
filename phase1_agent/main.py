@@ -12,7 +12,7 @@ from typing import Optional, List, Dict, Any
 
 from phase1_agent.config import GROQ_API_KEY, GROQ_MODEL, GROQ_API_URL, OUTPUT_DIR
 from phase1_agent.models import Person, Briefing, SearchResult, ScrapedContent
-from phase1_agent.tools import TavilySearch, FirecrawlScrape, FileSave
+from phase1_agent.tools import TavilySearch, FirecrawlScrape, FileSave, LinkExtractor
 from phase1_agent.prompts import SYSTEM_PROMPT, get_user_prompt, format_search_results_for_claude, format_scraped_content_for_claude
 from phase1_agent.cache import BriefingCache
 from phase1_agent.validator import ResultValidator, SearchRefinement, AmbiguityResolver
@@ -136,8 +136,42 @@ What 3-4 specific searches would give the most useful information about this per
         
         print(f"[SEARCH COMPLETE] Validated {len(all_search_results)} unique results")
         
-        # Step 3: Decide which URLs to scrape
-        print("[STEP 3] Analyzing which sources to scrape...")
+        # Step 3: Extract social links & contact info
+        print("[STEP 3] Extracting social profiles & contact info...")
+        social_links = {}
+        
+        # Combine all snippets and titles for link extraction
+        combined_text = " ".join([f"{r.title} {r.description}" for r in all_search_results])
+        extracted = LinkExtractor.extract_from_text(combined_text)
+        
+        # Also extract from each URL for more comprehensive results
+        for result in all_search_results[:3]:
+            url_links = LinkExtractor.extract_from_text(result.url)
+            for platform, values in url_links.items():
+                if platform not in social_links:
+                    social_links[platform] = []
+                social_links[platform].extend(values)
+        
+        # Merge with snippet-based extractions
+        for platform, values in extracted.items():
+            if platform not in social_links:
+                social_links[platform] = []
+            social_links[platform].extend(values)
+        
+        # Remove duplicates and display
+        for platform in social_links:
+            social_links[platform] = list(set(social_links[platform]))
+        
+        if social_links:
+            print("[FOUND]")
+            for platform, handles in social_links.items():
+                for handle in handles[:2]:  # Show top 2 per platform
+                    print(f"  • {platform.upper()}: {handle}")
+        else:
+            print("[NO SOCIAL LINKS] Profiles may be private")
+        
+        # Step 4: Analyze which sources to scrape
+        print("[STEP 4] Analyzing which sources to scrape...")
         results_formatted = format_search_results_for_claude(all_search_results[:5])
         
         scrape_decision_prompt = f"""Based on these search results, which URLs are most valuable to scrape for understanding {person.name}'s current thinking and their company's situation?
@@ -149,8 +183,8 @@ List the top 3-4 URLs to scrape, in order of usefulness."""
         scrape_decision = self._call_groq(scrape_decision_prompt)
         print(f"URLs to scrape:\n{scrape_decision}\n")
         
-        # Step 4 & 5: Use search results as primary content source
-        print("[STEP 4] Processing search results as content...")
+        # Step 5 & 6: Use search results as primary content source
+        print("[STEP 5] Processing search results as content...")
         scraped_contents = []
         
         # Convert search results directly to content with fallback scraping
@@ -178,8 +212,8 @@ List the top 3-4 URLs to scrape, in order of usefulness."""
             print("[ERROR] Completely unable to gather content")
             return None
         
-        # Step 5: Synthesize into briefing
-        print("[STEP 5] Synthesizing briefing...")
+        # Step 6: Synthesize into briefing
+        print("[STEP 6] Synthesizing briefing...")
         
         content_summary = "\n\n".join([
             format_scraped_content_for_claude(c) for c in scraped_contents
@@ -229,7 +263,7 @@ Generate the briefing in this JSON format:
                 print(briefing_json_str[:500])
                 return None
         
-        # Step 6: Create briefing object
+        # Step 7: Create briefing object
         briefing = Briefing(
             person=person,
             who_they_are=briefing_data.get("who_they_are", ""),
@@ -240,11 +274,12 @@ Generate the briefing in this JSON format:
             things_to_avoid=briefing_data.get("things_to_avoid", []),
             icebreaker=briefing_data.get("icebreaker", ""),
             sources=[r.url for r in all_search_results[:5]],
-            timestamp=datetime.now().isoformat()
+            timestamp=datetime.now().isoformat(),
+            social_links=social_links  # Add social links
         )
         
-        # Step 7: Validate briefing quality
-        print("[STEP 7] Validating briefing quality...")
+        # Step 8: Validate briefing quality
+        print("[STEP 8] Validating briefing quality...")
         is_valid, issues = BriefingValidator.validate_briefing(briefing)
         quality_score = BriefingValidator.get_quality_score(briefing)
         print(f"[QUALITY] Score: {quality_score:.0f}/100")
@@ -287,7 +322,8 @@ Generate the briefing in this JSON format:
                     things_to_avoid=retry_data.get("things_to_avoid", briefing.things_to_avoid),
                     icebreaker=retry_data.get("icebreaker", briefing.icebreaker),
                     sources=briefing.sources,
-                    timestamp=datetime.now().isoformat()
+                    timestamp=datetime.now().isoformat(),
+                    social_links=social_links
                 )
                 
                 # Validate again
@@ -298,8 +334,8 @@ Generate the briefing in this JSON format:
             except:
                 print("[RECOVERY FAILED] Using original briefing")
         
-        # Step 8: Save briefing
-        print("[STEP 8] Saving briefing...")
+        # Step 9: Save briefing
+        print("[STEP 9] Saving briefing...")
         filename = f"briefing_{person.name.replace(' ', '_').lower()}_{datetime.now().strftime('%Y-%m-%d')}.md"
         markdown = briefing.to_markdown()
         self.file_tool.save_briefing(filename, markdown, OUTPUT_DIR)

@@ -45,9 +45,10 @@ class Briefing:
     icebreaker: str
     sources: List[str]
     timestamp: str
-    social_handles: Optional[dict] = None  # NEW: LinkedIn, Twitter, Instagram, etc.
-    recent_activity: Optional[List] = None  # NEW: Recent activity from sources
-    deep_insights: Optional[dict] = None    # NEW: Deep insights from research
+    social_links: Optional[dict] = None  # LinkedIn, Twitter, Instagram, etc.
+    social_handles: Optional[dict] = None  # (deprecated - use social_links)
+    recent_activity: Optional[List] = None  # (deprecated)
+    deep_insights: Optional[dict] = None    # (deprecated)
     
     def to_markdown(self) -> str:
         """Convert briefing to markdown format"""
@@ -96,14 +97,16 @@ class Briefing:
         
         md += f"\n---\n\n## Icebreaker\n\n{self.icebreaker}\n\n"
         
-        # NEW: Add social handles if available
-        if self.social_handles:
+        # Add social links if available
+        if self.social_links and any(self.social_links.values()):
             md += "---\n\n## Connect With Them\n\n"
-            for platform, handle in self.social_handles.items():
-                md += f"- **{platform.upper()}**: {handle}\n"
+            for platform, handles in sorted(self.social_links.items()):
+                if handles:
+                    for handle in handles[:2]:  # Show top 2
+                        md += f"- **{platform.upper()}**: {handle}\n"
             md += "\n"
         
-        # NEW: Add recent activity if available
+        # Add recent activity if available
         if self.recent_activity:
             md += "---\n\n## Recent Activity\n\n"
             for activity in self.recent_activity:
