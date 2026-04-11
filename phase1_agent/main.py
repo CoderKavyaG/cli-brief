@@ -311,7 +311,7 @@ IMPORTANT: Use EXACTLY these section names - do not abbreviate or change them.""
         max_loops = 10  # Reduced to minimize context accumulation
         # Balance between maintaining context and avoiding payload size errors
         # With large scrape results (60KB+), need to be conservative
-        max_msg_history = 10  # Reduced from 12 to minimize payload
+        max_msg_history = 8  # Reduced from 10 - prioritize small payload over context
         
         while loop_count < max_loops:
             loop_count += 1
@@ -320,9 +320,8 @@ IMPORTANT: Use EXACTLY these section names - do not abbreviate or change them.""
             # Trim messages to prevent payload too large errors
             msgs_to_send = self.messages[-max_msg_history:] if len(self.messages) > max_msg_history else self.messages
             
-            # Pass system message only on first call
-            sys_msg = system_message if loop_count == 1 else None
-            response = self._call_groq_with_tools(msgs_to_send, tools, sys_msg)
+            # Pass system message on EVERY call to maintain context about tools and requirements
+            response = self._call_groq_with_tools(msgs_to_send, tools, system_message)
             
             message_content = response["choices"][0]["message"]
             
@@ -433,7 +432,7 @@ IMPORTANT: Use EXACTLY these section names - do not abbreviate or change them.""
                 self.messages.append({
                     "role": "tool",
                     "tool_call_id": tool_result["tool_call_id"],
-                    "content": tool_result["result"][:600]  # Reduced from 1200 to minimize payload
+                    "content": tool_result["result"][:400]  # Reduced from 600 to minimize payload
                 })
             
             print(f"[STATS] Searches: {self.search_count}, Scrapes: {self.scrape_count}, Successful: {self.scrape_success}\n")
