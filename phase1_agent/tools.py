@@ -52,83 +52,48 @@ class TavilySearch:
             return []
 
 class FirecrawlScrape:
-    """Tool 2: Scrape webpage content with fallback to search snippets"""
+    """Tool 2: Scrape webpage content using Jina API (no auth needed)"""
     
     @staticmethod
     def scrape(url: str, fallback_snippet: str = "") -> Optional[ScrapedContent]:
-        """Scrape URL using Firecrawl, fallback to snippet if blocked"""
-        if not FIRECRAWL_API_KEY:
-            raise ValueError("FIRECRAWL_API_KEY not set in .env")
-        
-        headers = {
-            "Authorization": f"Bearer {FIRECRAWL_API_KEY}"
-        }
-        
+        """Scrape URL using Jina AI API"""
         try:
-            print(f"[SCRAPE] URL: {url}")
-            response = requests.post(
-                FIRECRAWL_SCRAPE_URL,
-                json={"url": url},
-                headers=headers,
-                timeout=SCRAPE_TIMEOUT
+            jina_url = f"https://r.jina.ai/{url}"
+            response = requests.get(
+                jina_url,
+                headers={
+                    "Accept": "text/markdown",
+                    "User-Agent": "Mozilla/5.0"
+                },
+                timeout=20
             )
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            if data.get("success"):
-                content = ScrapedContent(
+            if response.status_code == 200 and len(response.text.strip()) > 200:
+                print(f"[JINA OK] Got {len(response.text)} characters")
+                return ScrapedContent(
                     url=url,
-                    title=data.get("metadata", {}).get("title", ""),
-                    content=data.get("markdown", ""),
+                    title="",
+                    content=response.text[:3000],
                     timestamp=datetime.now().isoformat()
                 )
-                print(f"[SCRAPE DONE] Got {len(content.content)} characters")
-                return content
             else:
-                print(f"[SCRAPE BLOCKED] Using snippet fallback")
+                print(f"[JINA FAILED] Got {len(response.text)} chars, using snippet")
                 if fallback_snippet:
-                    content = ScrapedContent(
+                    return ScrapedContent(
                         url=url,
                         title="",
                         content=fallback_snippet,
                         timestamp=datetime.now().isoformat()
                     )
-                    return content
                 return None
-                
-        except requests.exceptions.HTTPError as e:
-            print(f"[SCRAPE BLOCKED] {e.response.status_code} - Using snippet fallback")
+        except Exception as e:
+            print(f"[JINA ERROR] {str(e)}")
             if fallback_snippet:
-                content = ScrapedContent(
+                return ScrapedContent(
                     url=url,
                     title="",
                     content=fallback_snippet,
                     timestamp=datetime.now().isoformat()
                 )
-                return content
-            return None
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-            print(f"[SCRAPE TIMEOUT] {type(e).__name__} - Using snippet fallback")
-            if fallback_snippet:
-                content = ScrapedContent(
-                    url=url,
-                    title="",
-                    content=fallback_snippet,
-                    timestamp=datetime.now().isoformat()
-                )
-                return content
-            return None
-        except requests.exceptions.RequestException as e:
-            print(f"[SCRAPE ERROR] {str(e)} - Using snippet fallback")
-            if fallback_snippet:
-                content = ScrapedContent(
-                    url=url,
-                    title="",
-                    content=fallback_snippet,
-                    timestamp=datetime.now().isoformat()
-                )
-                return content
             return None
 
 class LinkExtractor:
