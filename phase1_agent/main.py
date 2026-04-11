@@ -130,6 +130,12 @@ class IntelAgent:
                 content = arguments.get("content", "")
                 name = arguments.get("name", "briefing")
                 
+                # Clean content to prevent issues
+                # Remove problematic characters that might cause JSON issues
+                content = content.replace('\r', '').replace('\t', ' ')
+                # Normalize multiple newlines
+                content = re.sub(r'\n\n+', '\n', content)
+                
                 # Normalize headers before saving
                 normalized = content
                 # Replace level 3 headers (###) with level 2 (##)
@@ -176,39 +182,55 @@ class IntelAgent:
         final_briefing_content = ""  # Store briefing from save_briefing tool call
         
         # SYSTEM INSTRUCTIONS FOR GROQ
-        system_message = f"""You are an Executive Briefing Specialist AI.
+        system_message = f"""You are an Executive Briefing Specialist.
 
-CRITICAL - FOLLOW THESE RULES EXACTLY:
+REQUIREMENTS:
+1. Research the person using search and scrape tools
+2. Write a briefing with exactly these sections (use exactly these headers):
+   - # Executive Briefing: [Name]
+   - ## Who They Are
+   - ## What They Care About
+   - ## Current Company Situation
+   - ## Meeting Approach
+   - ## Smart Questions to Ask
+   - ## Things to Avoid
+   - ## Icebreaker / Common Ground
 
-1. Generate the briefing THEN call save_briefing
-2. Briefing format (use EXACTLY these headers):
-   
-# Executive Briefing: Name
+3. IMPORTANT: Keep content SIMPLE and SHORT
+   - 1-2 sentences per section MAXIMUM
+   - NO markdown bullets or special characters
+   - NO quotes or apostrophes if possible
+   - Use only plain text
+
+4. After research, call save_briefing with:
+   - name: Person's full name
+   - content: The complete briefing with all sections
+
+EXAMPLE FORMAT (follow exactly):
+# Executive Briefing: John Doe
+
 ## Who They Are
-Paragraph text here
-## What They Care About  
-Bullet list format
+John Doe is the CEO of TechCompany. He has 20 years of industry experience.
+
+## What They Care About
+He focuses on innovation and customer satisfaction.
+
 ## Current Company Situation
-Paragraph text here
+TechCompany is a leader in cloud solutions.
+
 ## Meeting Approach
-Bullet list format
+Be prepared to discuss technology trends.
+
 ## Smart Questions to Ask
-Question 1
-Question 2  
-Question 3
+What is your vision for the next 5 years?
+
 ## Things to Avoid
-Point 1
-Point 2
-Point 3
+Do not discuss financial details.
+
 ## Icebreaker / Common Ground
-Final thought here
+Ask about recent industry awards.
 
-3. Call save_briefing with this complete briefing
-4. Keep each section concise - 2-3 sentences or bullets maximum
-5. NO special characters, NO extra formatting - plain text only
-6. Keep content focused and brief
-
-START RESEARCHING NOW."""
+NOW: Search, gather information, then CALL save_briefing exactly as shown above."""
         
         # Define tools for Groq
         tools = [
@@ -286,10 +308,10 @@ IMPORTANT: Use EXACTLY these section names - do not abbreviate or change them.""
         
         # Agentic loop
         loop_count = 0
-        max_loops = 20
+        max_loops = 10  # Reduced to minimize context accumulation
         # Balance between maintaining context and avoiding payload size errors
         # With large scrape results (60KB+), need to be conservative
-        max_msg_history = 12  # Reduced from 20 to avoid 400/413 errors
+        max_msg_history = 10  # Reduced from 12 to minimize payload
         
         while loop_count < max_loops:
             loop_count += 1
