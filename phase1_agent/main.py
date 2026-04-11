@@ -136,37 +136,51 @@ What 3-4 specific searches would give the most useful information about this per
         
         print(f"[SEARCH COMPLETE] Validated {len(all_search_results)} unique results")
         
-        # Step 3: Extract social links & contact info
+        # Step 3: Extract social links & contact info from search results
         print("[STEP 3] Extracting social profiles & contact info...")
         social_links = {}
         
-        # Combine all snippets and titles for link extraction
+        # Direct extraction from URLs (most reliable)
+        for result in all_search_results:
+            # Extract from URL itself
+            if "linkedin" in result.url.lower():
+                if "linkedin" not in social_links:
+                    social_links["linkedin"] = []
+                social_links["linkedin"].append(result.url)
+            elif "twitter.com" in result.url.lower() or "x.com" in result.url.lower():
+                if "twitter" not in social_links:
+                    social_links["twitter"] = []
+                social_links["twitter"].append(result.url)
+            elif "instagram" in result.url.lower():
+                if "instagram" not in social_links:
+                    social_links["instagram"] = []
+                social_links["instagram"].append(result.url)
+            elif "github" in result.url.lower():
+                if "github" not in social_links:
+                    social_links["github"] = []
+                social_links["github"].append(result.url)
+        
+        # Also extract from combined text snippets
         combined_text = " ".join([f"{r.title} {r.description}" for r in all_search_results])
-        extracted = LinkExtractor.extract_from_text(combined_text)
+        text_extracted = LinkExtractor.extract_from_text(combined_text)
         
-        # Also extract from each URL for more comprehensive results
-        for result in all_search_results[:3]:
-            url_links = LinkExtractor.extract_from_text(result.url)
-            for platform, values in url_links.items():
-                if platform not in social_links:
-                    social_links[platform] = []
-                social_links[platform].extend(values)
-        
-        # Merge with snippet-based extractions
-        for platform, values in extracted.items():
+        # Merge with URL-based extractions (URL-based takes priority)
+        for platform, values in text_extracted.items():
             if platform not in social_links:
                 social_links[platform] = []
             social_links[platform].extend(values)
         
-        # Remove duplicates and display
+        # Remove duplicates
         for platform in social_links:
-            social_links[platform] = list(set(social_links[platform]))
+            social_links[platform] = list(dict.fromkeys(social_links[platform]))[:3]  # Keep unique, top 3
         
+        # Display found links
         if social_links:
             print("[FOUND]")
-            for platform, handles in social_links.items():
-                for handle in handles[:2]:  # Show top 2 per platform
-                    print(f"  • {platform.upper()}: {handle}")
+            for platform, links in social_links.items():
+                for link in links[:2]:  # Show top 2 per platform
+                    display_text = link if link.startswith("http") else f"@{link}"
+                    print(f"  • {platform.upper()}: {display_text[:70]}")
         else:
             print("[NO SOCIAL LINKS] Profiles may be private")
         

@@ -1,5 +1,6 @@
 import requests
 import json
+import re
 from typing import List, Optional, Dict, Any
 from phase1_agent.config import (
     TAVILY_API_KEY, FIRECRAWL_API_KEY, TAVILY_SEARCH_URL, FIRECRAWL_SCRAPE_URL,
@@ -121,8 +122,6 @@ class FirecrawlScrape:
 
 class LinkExtractor:
     """Tool 3: Extract social media & personal links from content"""
-    
-    import re
     
     PATTERNS = {
         "linkedin": r"https?://(?:www\.)?(?:linkedin\.com|in\.linkedin\.com)/(?:in|company|showcase)/([a-z0-9\-]+)",
