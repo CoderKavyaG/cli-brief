@@ -74,9 +74,30 @@ class IntelAgent:
                         time.sleep(wait_time)
                         continue
                 if e.response.status_code == 400:
-                    # Provide more detail on 400 errors
+                    # Try to extract useful info from 400 error
+                    error_text = e.response.text
                     print(f"[GROQ 400 ERROR] Bad Request")
-                    print(f"[GROQ] Response: {e.response.text[:500]}")
+                    print(f"[GROQ] Response: {error_text[:500]}")
+                    
+                    # Try to extract failed_generation content
+                    if "failed_generation" in error_text:
+                        try:
+                            error_json = json.loads(error_text)
+                            failed_gen = error_json.get("error", {}).get("failed_generation", "")
+                            if failed_gen:
+                                print(f"[GROQ] Failed generation extracted: {failed_gen[:200]}")
+                                # Return a synthetic response with the generated content as assistant message
+                                return {
+                                    "choices": [{
+                                        "message": {
+                                            "content": failed_gen,
+                                            "role": "assistant"
+                                        }
+                                    }]
+                                }
+                        except:
+                            pass
+                    
                     print(f"[GROQ] Payload size: {len(str(messages_to_send))} chars, {len(str(tools))} chars in tools")
                 print(f"[GROQ ERROR] {str(e)}")
                 raise
@@ -114,16 +135,20 @@ class IntelAgent:
                 
                 if scraped and len(scraped.content) > 200:
                     self.scrape_success += 1
+                    # Cap scrape result to prevent payload issues
+                    content_capped = scraped.content[:800]
+                    # Ensure it doesn't break JSON by removing problematic chars
+                    content_capped = content_capped.replace('"', "'").replace('\n', ' ').replace('\r', '')
                     return json.dumps({
                         "success": True,
                         "url": url,
-                        "content": scraped.content[:1000]
-                    }, separators=(',', ':'))
+                        "content": content_capped
+                    }, separators=(',', ':'), ensure_ascii=True)
                 else:
                     return json.dumps({
                         "success": False,
                         "url": url
-                    }, separators=(',', ':'))
+                    }, separators=(',', ':'), ensure_ascii=True)
             
             elif tool_name == "save_briefing":
                 import re
@@ -182,67 +207,56 @@ class IntelAgent:
         final_briefing_content = ""  # Store briefing from save_briefing tool call
         
         # SYSTEM INSTRUCTIONS FOR GROQ
-        system_message = f"""You are an Executive Briefing Specialist.
+        system_message = f"""You are an Executive Briefing Specialist AI. Your task is to research a person and create an executive briefing.
 
 REQUIREMENTS:
-1. Research the person using search and scrape tools
-2. Write a briefing with exactly these sections (use exactly these headers):
-   - # Executive Briefing: [Name]
-   - ## Who They Are
-   - ## What They Care About
-   - ## Current Company Situation
-   - ## Meeting Approach
-   - ## Smart Questions to Ask
-   - ## Things to Avoid
-   - ## Icebreaker / Common Ground
+1. Use tavily_search to find information about the person
+2. Use jina_scrape to read the best URLs found in search results (2-3 URLs maximum)
+3. After gathering information, ALWAYS call the save_briefing tool with the complete briefing
+4. IMPORTANT: You MUST call save_briefing when ready - do NOT just generate text
 
-3. IMPORTANT: Keep content SIMPLE and SHORT
-   - 1-2 sentences per section MAXIMUM
-   - NO markdown bullets or special characters
-   - NO quotes or apostrophes if possible
-   - Use only plain text
-
-4. After research, call save_briefing with:
-   - name: Person's full name
-   - content: The complete briefing with all sections
-
-EXAMPLE FORMAT (follow exactly):
-# Executive Briefing: John Doe
+BRIEFING STRUCTURE (use these EXACT headers):
+# Executive Briefing: [Person Name]
 
 ## Who They Are
-John Doe is the CEO of TechCompany. He has 20 years of industry experience.
+[1-2 sentences about their role and background]
 
 ## What They Care About
-He focuses on innovation and customer satisfaction.
+[1-2 sentences about their interests and focus areas]
 
 ## Current Company Situation
-TechCompany is a leader in cloud solutions.
+[1-2 sentences about their company and current status]
 
 ## Meeting Approach
-Be prepared to discuss technology trends.
+[1-2 sentences about how to approach them]
 
 ## Smart Questions to Ask
-What is your vision for the next 5 years?
+[1-2 sentences with suggested questions]
 
 ## Things to Avoid
-Do not discuss financial details.
+[1-2 sentences about what to avoid]
 
 ## Icebreaker / Common Ground
-Ask about recent industry awards.
+[1-2 sentences for starting the conversation]
 
-NOW: Search, gather information, then CALL save_briefing exactly as shown above."""
+CRITICAL: When you have gathered enough information, call save_briefing function with:
+- content: the complete briefing markdown (all 8 sections)
+- name: the person's full name"""
         
-        # Define tools for Groq
+        # Define tools for Groq - OpenAI format
         tools = [
             {
                 "type": "function",
                 "function": {
                     "name": "tavily_search",
-                    "description": "Search the web. Use for finding recent news, interviews, company info. Search queries should contain ONLY: person name + company + research keywords. Never include meeting context.",
+                    "description": "Search the web for information about a person. Returns recent news, articles, and information.",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "query": {"type": "string", "description": "Search query with only person name, company, and research keywords"}
+                            "query": {
+                                "type": "string",
+                                "description": "Search query (name, company, keywords)"
+                            }
                         },
                         "required": ["query"]
                     }
@@ -252,11 +266,14 @@ NOW: Search, gather information, then CALL save_briefing exactly as shown above.
                 "type": "function",
                 "function": {
                     "name": "jina_scrape",
-                    "description": "Read full content of a webpage. Use after searching to read articles, blogs, company pages.",
+                    "description": "Read the full content of a webpage. Use after finding URLs in search results.",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "url": {"type": "string", "description": "URL to scrape"}
+                            "url": {
+                                "type": "string",
+                                "description": "The URL to scrape"
+                            }
                         },
                         "required": ["url"]
                     }
@@ -266,12 +283,18 @@ NOW: Search, gather information, then CALL save_briefing exactly as shown above.
                 "type": "function",
                 "function": {
                     "name": "save_briefing",
-                    "description": "Save the completed briefing. Only call this once you have gathered enough research.",
+                    "description": "Save the completed executive briefing. Call this when you have gathered enough research.",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "content": {"type": "string", "description": "Full briefing markdown content"},
-                            "name": {"type": "string", "description": "Person's name for filename"}
+                            "content": {
+                                "type": "string",
+                                "description": "The complete briefing markdown with all 8 sections"
+                            },
+                            "name": {
+                                "type": "string",
+                                "description": "Person's full name"
+                            }
                         },
                         "required": ["content", "name"]
                     }
@@ -280,17 +303,18 @@ NOW: Search, gather information, then CALL save_briefing exactly as shown above.
         ]
         
         # Initial system message
-        initial_prompt = f"""Research this person and create their executive briefing:
+        initial_prompt = f"""Please research this person and create their executive briefing:
 
 Name: {person.name}
 Role: {person.role}
 Company: {person.company}
 
 YOUR TASK:
-1. Search for information about this person (use tavily_search)
-2. Scrape 2-3 high-quality URLs (use jina_scrape)
-3. Create a briefing with these EXACT section headers:
-   - # Executive Briefing: [Full Name]
+1. Search for information (call tavily_search 1-2 times)
+2. Scrape URLs (call jina_scrape 2-3 times with URLs from search results)
+3. Read the information you gathered
+4. Create the briefing with these EXACT section headers:
+   - # Executive Briefing: {person.name}
    - ## Who They Are
    - ## What They Care About
    - ## Current Company Situation
@@ -298,9 +322,9 @@ YOUR TASK:
    - ## Smart Questions to Ask
    - ## Things to Avoid
    - ## Icebreaker / Common Ground
-4. Call save_briefing with your complete briefing
+5. Call save_briefing with content and name
 
-IMPORTANT: Use EXACTLY these section names - do not abbreviate or change them."""
+IMPORTANT: You MUST call save_briefing at the end. Do not just output text. Use the save_briefing function."""
 
         self.messages = [
             {"role": "user", "content": initial_prompt}
@@ -308,10 +332,8 @@ IMPORTANT: Use EXACTLY these section names - do not abbreviate or change them.""
         
         # Agentic loop
         loop_count = 0
-        max_loops = 10  # Reduced to minimize context accumulation
-        # Balance between maintaining context and avoiding payload size errors
-        # With large scrape results (60KB+), need to be conservative
-        max_msg_history = 8  # Reduced from 10 - prioritize small payload over context
+        max_loops = 5  # Reduced - should be able to complete in 2-3 loops
+        max_msg_history = 4  # Keep only most recent messages to minimize payload
         
         while loop_count < max_loops:
             loop_count += 1
@@ -320,16 +342,22 @@ IMPORTANT: Use EXACTLY these section names - do not abbreviate or change them.""
             # Trim messages to prevent payload too large errors
             msgs_to_send = self.messages[-max_msg_history:] if len(self.messages) > max_msg_history else self.messages
             
-            # Pass system message on EVERY call to maintain context about tools and requirements
+            # Pass system message on EVERY call
             response = self._call_groq_with_tools(msgs_to_send, tools, system_message)
             
             message_content = response["choices"][0]["message"]
             
-            # Add assistant response (truncated to save space)
-            self.messages.append({
-                "role": "assistant",
-                "content": message_content.get("content", "")[:400]
-            })
+            # Store the full message for tool calls, but can truncate text later
+            assistant_message = {
+                "role": "assistant", 
+                "content": message_content.get("content", "")
+            }
+            
+            # Add tool_calls if present 
+            if "tool_calls" in message_content:
+                assistant_message["tool_calls"] = message_content["tool_calls"]
+            
+            self.messages.append(assistant_message)
             
             # Check for tool calls
             tool_calls = message_content.get("tool_calls", [])
@@ -429,10 +457,22 @@ IMPORTANT: Use EXACTLY these section names - do not abbreviate or change them.""
             
             # Add tool results to messages (size-capped to prevent bloat)
             for tool_result in tool_results:
+                # Ensure tool result content is valid JSON
+                result_content = tool_result["result"]
+                
+                # Truncate but preserve valid JSON structure
+                if len(result_content) > 400:
+                    # For JSON, try to truncate while keeping it valid
+                    truncated = result_content[:400]
+                    # Try to make it valid JSON by closing any open structures
+                    if truncated.count('{') > truncated.count('}'):
+                        truncated = truncated.rsplit(',', 1)[0] + '}'
+                    result_content = truncated
+                
                 self.messages.append({
                     "role": "tool",
                     "tool_call_id": tool_result["tool_call_id"],
-                    "content": tool_result["result"][:400]  # Reduced from 600 to minimize payload
+                    "content": result_content
                 })
             
             print(f"[STATS] Searches: {self.search_count}, Scrapes: {self.scrape_count}, Successful: {self.scrape_success}\n")
