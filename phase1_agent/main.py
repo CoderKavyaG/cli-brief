@@ -32,10 +32,18 @@ class IntelAgent:
         self.scrape_count = 0
         self.scrape_success = 0
     
-    def _call_groq_with_tools(self, messages: List[Dict], tools: List[Dict]) -> Dict:
+    def _call_groq_with_tools(self, messages: List[Dict], tools: List[Dict], system_message: str = None) -> Dict:
         """Call Groq API with tool calling support"""
         max_retries = 3
         base_wait = 2
+        
+        # Prepend system message if provided
+        if system_message:
+            messages_to_send = [
+                {"role": "system", "content": system_message}
+            ] + messages
+        else:
+            messages_to_send = messages
         
         for attempt in range(max_retries):
             try:
@@ -48,7 +56,7 @@ class IntelAgent:
                     GROQ_API_URL,
                     json={
                         "model": GROQ_MODEL,
-                        "messages": messages,
+                        "messages": messages_to_send,
                         "tools": tools,
                         "temperature": 0.7,
                         "max_tokens": 2000
@@ -113,11 +121,30 @@ class IntelAgent:
                     }, separators=(',', ':'))
             
             elif tool_name == "save_briefing":
+                import re
                 content = arguments.get("content", "")
                 name = arguments.get("name", "briefing")
                 
+                # Normalize headers before saving
+                normalized = content
+                # Replace level 3 headers (###) with level 2 (##)
+                normalized = re.sub(r'^### ', '## ', normalized, flags=re.MULTILINE)
+                # Normalize abbreviated section names
+                normalized = normalized.replace("## Who\n", "## Who They Are\n")
+                normalized = normalized.replace("## What They Care\n", "## What They Care About\n")
+                normalized = normalized.replace("## What\n", "## What They Care About\n")
+                normalized = normalized.replace("## Company\n", "## Current Company Situation\n")  
+                normalized = normalized.replace("## Approach\n", "## Meeting Approach\n")
+                normalized = normalized.replace("## Questions\n", "## Smart Questions to Ask\n")
+                normalized = normalized.replace("## Avoid\n", "## Things to Avoid\n")
+                normalized = normalized.replace("## Icebreaker\n", "## Icebreaker / Common Ground\n")
+                
+                # Add title if missing
+                if "# Executive Briefing:" not in normalized:
+                    normalized = f"# Executive Briefing: {name}\n\n{normalized}"
+                
                 filename = f"briefing_{name.replace(' ', '_').lower()}_{datetime.now().strftime('%Y-%m-%d')}.md"
-                self.file_tool.save_briefing(filename, content, OUTPUT_DIR)
+                self.file_tool.save_briefing(filename, normalized, OUTPUT_DIR)
                 print(f"  [SAVE] {filename}")
                 
                 return json.dumps({
@@ -140,6 +167,54 @@ class IntelAgent:
         print("="*60)
         print(f"RESEARCHING: {person.name} ({person.role})")
         print("="*60 + "\n")
+        
+        final_briefing_content = ""  # Store briefing from save_briefing tool call
+        
+        # SYSTEM INSTRUCTIONS FOR GROQ
+        system_message = f"""You are an Executive Briefing Specialist AI.
+
+YOUR CRITICAL RESPONSIBILITY:
+After researching, you must create a SYNTHESIZED executive briefing - NOT raw scraped content.
+
+REQUIRED FORMAT (Use THESE EXACT HEADERS - letter for letter):
+
+# Executive Briefing: [Full Name]
+
+## Who They Are
+[2-3 sentences about background, current role, career]
+
+## What They Care About
+- [Key interest 1]
+- [Key interest 2]  
+- [Key interest 3]
+
+## Current Company Situation
+[2-3 sentences about company strategy and challenges]
+
+## Meeting Approach
+- Tone: [describe style]
+- Focus: [main topics]
+
+## Smart Questions to Ask
+- [Question 1]
+- [Question 2]
+- [Question 3]
+
+## Things to Avoid
+- [Avoid 1]
+- [Avoid 2]
+- [Avoid 3]
+
+## Icebreaker / Common Ground
+[1-2 sentences about connection point or achievement]
+
+CRITICAL RULES - YOU MUST FOLLOW:
+1. Use the EXACT headers shown above - no substitutions or abbreviations
+2. Never copy-paste raw scraped content
+3. Synthesize and interpret what you research
+4. Be specific and factual
+5. Make it actionable
+6. When calling save_briefing, pass the complete formatted briefing"""
         
         # Define tools for Groq
         tools = [
@@ -189,26 +264,35 @@ class IntelAgent:
         ]
         
         # Initial system message
-        initial_prompt = f"""You are researching: {person.name}
+        initial_prompt = f"""Research this person and create their executive briefing:
+
+Name: {person.name}
 Role: {person.role}
 Company: {person.company}
-Meeting Context: {person.context}
+Context: Preparing for a {person.context}
 
-Use the tools to find current information about this person. Run at least 4 searches and scrape at least 2 pages before writing the briefing.
+CRITICAL - Your Final Task:
+You must call save_briefing with a SYNTHESIZED executive briefing (not raw scraped content).
+The briefing must follow the "# Executive Briefing:" format exactly.
+DO NOT pass raw scraped HTML/text to save_briefing - SYNTHESIZE insights.
 
-Remember critical rules:
-- Search queries contain ONLY person name, company, and research keywords - NEVER include "{person.context}" in searches
-- Run searches in this order:
-  1. {person.name} {person.company} 2026
-  2. {person.name} interview OR podcast 2025 OR 2026
-  3. {person.company} news OR announcement 2026
-  4. {person.company} engineering blog OR tech blog
-  5. {person.company} jobs hiring 2026
-  6. site:linkedin.com {person.name} {person.company}
-- Scrape at least 2 different URLs to get quality content
-- Create a briefing following the exact OUTPUT STRUCTURE from your system prompt
-- Include a Research Confidence section tracking searches run and pages scraped
-- End by calling save_briefing with the complete markdown content"""
+Search Strategy:
+1. "{person.name} {person.company} 2026" - Recent news
+2. "{person.name} interview OR podcast" - Personal insights  
+3. "{person.company} news OR announcement" - Company updates
+4. "{person.company} engineering" - Technical direction
+5. "site:linkedin.com {person.name}" - Professional profile
+
+Your Steps:
+1. ✓ Conduct 4-6 web searches
+2. ✓ Scrape 2-3 high-quality sources
+3. ✓ SYNTHESIZE: Create a briefing that INTERPRETS the research
+4. ✓ Call save_briefing with the formatted briefing
+
+Remember:
+- SYNTHESIZE, don't copy-paste
+- Briefing must have "# Executive Briefing:" at the top
+- Include all 8 sections: Who, What They Care, Company, Approach, Questions, Avoid, Icebreaker, Sources"""
 
         self.messages = [
             {"role": "user", "content": initial_prompt}
@@ -217,7 +301,9 @@ Remember critical rules:
         # Agentic loop
         loop_count = 0
         max_loops = 20
-        max_msg_history = 8  # Trim message history to prevent 413 payload errors
+        # Balance between maintaining context and avoiding payload size errors
+        # Keep enough for 1-2 research loops but trim to prevent 413 errors
+        max_msg_history = 20
         
         while loop_count < max_loops:
             loop_count += 1
@@ -226,7 +312,9 @@ Remember critical rules:
             # Trim messages to prevent payload too large errors
             msgs_to_send = self.messages[-max_msg_history:] if len(self.messages) > max_msg_history else self.messages
             
-            response = self._call_groq_with_tools(msgs_to_send, tools)
+            # Pass system message only on first call
+            sys_msg = system_message if loop_count == 1 else None
+            response = self._call_groq_with_tools(msgs_to_send, tools, sys_msg)
             
             message_content = response["choices"][0]["message"]
             
@@ -240,29 +328,51 @@ Remember critical rules:
             tool_calls = message_content.get("tool_calls", [])
             
             if not tool_calls:
-                # No more tool calls - Groq is done
-                print("\n[AGENT COMPLETE] Groq finished research")
+                # No more tool calls - Groq generated briefing as text (not via save_briefing tool)
+                print("\n[AGENT COMPLETE] Groq finished without calling save_briefing")
+                print("[INFO] Using message content briefing (alternate generation mode)")
                 
                 # Extract final briefing from last message
                 final_content = message_content.get("content", "")
                 
                 if final_content:
-                    # Save it if not already saved via tool call
-                    if "save_briefing" not in str(tool_calls):
-                        filename = f"briefing_{person.name.replace(' ', '_').lower()}_{datetime.now().strftime('%Y-%m-%d')}.md"
-                        self.file_tool.save_briefing(filename, final_content, OUTPUT_DIR)
-                        print(f"[SAVE] {filename}")
+                    import re
+                    # Normalize section headers if needed
+                    normalized_content = final_content
+                    
+                    # Add main title if missing
+                    if "# Executive Briefing:" not in normalized_content:
+                        normalized_content = f"# Executive Briefing: {person.name}\n\n{normalized_content}"
+                    
+                    # Replace level 3 headers (###) with level 2 (##) for consistency
+                    normalized_content = re.sub(r'^### ', '## ', normalized_content, flags=re.MULTILINE)
+                    
+                    # Normalize abbreviated section header names
+                    normalized_content = normalized_content.replace("## Who\n", "## Who They Are\n")
+                    normalized_content = normalized_content.replace("## What They Care\n", "## What They Care About\n")
+                    normalized_content = normalized_content.replace("## What\n", "## What They Care About\n")
+                    normalized_content = normalized_content.replace("## Company\n", "## Current Company Situation\n")  
+                    normalized_content = normalized_content.replace("## Approach\n", "## Meeting Approach\n")
+                    normalized_content = normalized_content.replace("## Questions\n", "## Smart Questions to Ask\n")
+                    normalized_content = normalized_content.replace("## Avoid\n", "## Things to Avoid\n")
+                    normalized_content = normalized_content.replace("## Icebreaker\n", "## Icebreaker / Common Ground\n")
+                    
+                    filename = f"briefing_{person.name.replace(' ', '_').lower()}_{datetime.now().strftime('%Y-%m-%d')}.md"
+                    self.file_tool.save_briefing(filename, normalized_content, OUTPUT_DIR)
+                    print(f"[SAVE] {filename}")
+                    
+                    final_content = normalized_content
                 
-                # Build briefing object with metadata
+                # Build briefing object with fallback content
                 briefing = Briefing(
                     person=person,
-                    who_they_are=final_content[:500],
-                    what_they_care_about=final_content[500:1000],
-                    company_situation=final_content[1000:1500],
-                    meeting_approach=final_content[1500:2000],
-                    smart_questions=["See full briefing for details"],
-                    things_to_avoid=["See full briefing for details"],
-                    icebreaker=final_content[2000:2200],
+                    who_they_are=final_content[:400],
+                    what_they_care_about=final_content[400:900],
+                    company_situation=final_content[900:1400],
+                    meeting_approach=final_content[1400:1900],
+                    smart_questions=["See full briefing"],
+                    things_to_avoid=["See full briefing"],
+                    icebreaker=final_content[1900:2100],
                     sources=[f"Research: {self.search_count} searches, {self.scrape_success} scrapes"],
                     timestamp=datetime.now().isoformat()
                 )
@@ -277,6 +387,10 @@ Remember critical rules:
                 tool_name = tool_call["function"]["name"]
                 arguments = json.loads(tool_call["function"]["arguments"])
                 
+                # CRITICAL FIX: Extract briefing content from save_briefing BEFORE executing
+                if tool_name == "save_briefing":
+                    final_briefing_content = arguments.get("content", "")
+                
                 print(f"  > {tool_name}")
                 result = self._execute_tool(tool_name, arguments)
                 
@@ -285,6 +399,26 @@ Remember critical rules:
                     "tool_name": tool_name,
                     "result": result
                 })
+                
+                # If save_briefing was called, stop the loop - research is complete
+                if tool_name == "save_briefing":
+                    print("\n[AGENT COMPLETE] Briefing saved successfully")
+                    print(f"[STATS] Total: {self.search_count} searches, {self.scrape_count} scrapes, {self.scrape_success} successful\n")
+                    
+                    # Build briefing object with actual content
+                    briefing = Briefing(
+                        person=person,
+                        who_they_are=final_briefing_content[:400],
+                        what_they_care_about=final_briefing_content[400:900],
+                        company_situation=final_briefing_content[900:1400],
+                        meeting_approach=final_briefing_content[1400:1900],
+                        smart_questions=final_briefing_content.split("## Smart Questions")[-1].split("##")[0].strip().split("\n") if "## Smart Questions" in final_briefing_content else ["See full briefing"],
+                        things_to_avoid=final_briefing_content.split("## Things to Avoid")[-1].split("##")[0].strip().split("\n") if "## Things to Avoid" in final_briefing_content else ["See full briefing"],
+                        icebreaker=final_briefing_content[1900:2100],
+                        sources=[f"Research: {self.search_count} searches, {self.scrape_success} scrapes"],
+                        timestamp=datetime.now().isoformat()
+                    )
+                    return briefing
             
             # Add tool results to messages (size-capped to prevent bloat)
             for tool_result in tool_results:
