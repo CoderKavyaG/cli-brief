@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Phase 1: Agent Loop
-Intel briefing agent using local Ollama
+Phase 1: Agent Loop with Groq Tool Calling
+Intel briefing agent - Groq decides what tools to call
 """
 
 import sys
@@ -14,25 +14,26 @@ from typing import Optional, List, Dict, Any
 from phase1_agent.config import GROQ_API_KEY, GROQ_MODEL, GROQ_API_URL, OUTPUT_DIR
 from phase1_agent.models import Person, Briefing, SearchResult, ScrapedContent
 from phase1_agent.tools import TavilySearch, FirecrawlScrape, FileSave, LinkExtractor
-from phase1_agent.prompts import SYSTEM_PROMPT, get_user_prompt, format_search_results_for_claude, format_scraped_content_for_claude
+from phase1_agent.prompts import SYSTEM_PROMPT, get_user_prompt
 from phase1_agent.cache import BriefingCache
-from phase1_agent.validator import ResultValidator, SearchRefinement, AmbiguityResolver
-from phase1_agent.recovery import RetryStrategy, SearchRecovery, ContentRecovery
-from phase1_agent.quality import BriefingValidator, BriefingRepair
+from phase1_agent.quality import BriefingValidator
 import os
 
 class IntelAgent:
-    """Main agent that orchestrates research"""
+    """Main agent that orchestrates research via Groq tool calling"""
     
     def __init__(self):
         self.cache = BriefingCache()
         self.search_tool = TavilySearch()
         self.scrape_tool = FirecrawlScrape()
         self.file_tool = FileSave()
-        self.conversation_history = []
+        self.messages = []
+        self.search_count = 0
+        self.scrape_count = 0
+        self.scrape_success = 0
     
-    def _call_groq(self, prompt: str, system: str = SYSTEM_PROMPT) -> str:
-        """Call Groq API for fast LLM inference with exponential backoff"""
+    def _call_groq_with_tools(self, messages: List[Dict], tools: List[Dict]) -> Dict:
+        """Call Groq API with tool calling support"""
         max_retries = 3
         base_wait = 2
         
@@ -47,10 +48,8 @@ class IntelAgent:
                     GROQ_API_URL,
                     json={
                         "model": GROQ_MODEL,
-                        "messages": [
-                            {"role": "system", "content": system},
-                            {"role": "user", "content": prompt}
-                        ],
+                        "messages": messages,
+                        "tools": tools,
                         "temperature": 0.7,
                         "max_tokens": 2000
                     },
@@ -58,11 +57,11 @@ class IntelAgent:
                     timeout=30
                 )
                 response.raise_for_status()
-                return response.json()["choices"][0]["message"]["content"]
+                return response.json()
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 429:  # Rate limit
                     if attempt < max_retries - 1:
-                        wait_time = base_wait * (2 ** attempt)  # Exponential backoff
+                        wait_time = base_wait * (2 ** attempt)
                         print(f"[GROQ RATE LIMIT] Retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
                         time.sleep(wait_time)
                         continue
@@ -72,315 +71,239 @@ class IntelAgent:
                 print(f"[GROQ ERROR] {str(e)}")
                 raise
         
-        raise Exception(f"[GROQ ERROR] Max retries exceeded after {max_retries} attempts")
+        raise Exception(f"[GROQ ERROR] Max retries exceeded")
+    
+    def _execute_tool(self, tool_name: str, arguments: Dict) -> str:
+        """Execute a tool and return result as string"""
+        try:
+            if tool_name == "tavily_search":
+                query = arguments.get("query", "")
+                print(f"  [SEARCH] {query}")
+                self.search_count += 1
+                results = self.search_tool.search(query, count=3)
+                
+                # Format results
+                formatted = []
+                for r in results:
+                    formatted.append({
+                        "title": r.title,
+                        "url": r.url,
+                        "description": r.description
+                    })
+                return json.dumps({"results": formatted, "count": len(formatted)})
+            
+            elif tool_name == "jina_scrape":
+                url = arguments.get("url", "")
+                print(f"  [SCRAPE] {url}")
+                self.scrape_count += 1
+                
+                scraped = self.scrape_tool.scrape(url, fallback_snippet="")
+                
+                if scraped and len(scraped.content) > 200:
+                    self.scrape_success += 1
+                    return json.dumps({
+                        "success": True,
+                        "url": url,
+                        "title": scraped.title,
+                        "content": scraped.content[:4000]
+                    })
+                else:
+                    return json.dumps({
+                        "success": False,
+                        "url": url,
+                        "error": "Scrape failed or returned minimal content"
+                    })
+            
+            elif tool_name == "save_briefing":
+                content = arguments.get("content", "")
+                name = arguments.get("name", "briefing")
+                
+                filename = f"briefing_{name.replace(' ', '_').lower()}_{datetime.now().strftime('%Y-%m-%d')}.md"
+                self.file_tool.save_briefing(filename, content, OUTPUT_DIR)
+                print(f"  [SAVE] {filename}")
+                
+                return json.dumps({
+                    "success": True,
+                    "filename": filename
+                })
+            
+            else:
+                return json.dumps({"error": f"Unknown tool: {tool_name}"})
+        
+        except Exception as e:
+            return json.dumps({"error": str(e)})
     
     def research(self, person: Person) -> Optional[Briefing]:
-        """Main research loop"""
+        """
+        Main research loop using Groq tool calling.
+        Groq decides what tools to call.
+        """
         
-        print(f"\n{'='*60}")
+        print("="*60)
         print(f"RESEARCHING: {person.name} ({person.role})")
-        print(f"{'='*60}\n")
+        print("="*60 + "\n")
         
-        # Check cache first
-        cached = self.cache.get(person.name, person.role)
-        if cached:
-            # Reconstruct Person and Briefing objects from cached dict
-            person_dict = cached.get('person', {})
-            person_obj = Person(**person_dict) if person_dict else person
-            
-            briefing_data = {k: v for k, v in cached.items() if k != 'person'}
-            briefing = Briefing(person=person_obj, **briefing_data)
-            return briefing
-        
-        # Step 1: Initial research query
-        print("[STEP 1] Planning research strategy...")
-        search_plan_prompt = f"""Plan the research strategy for:
-Name: {person.name}
-Role: {person.role}
-Company: {person.company}
-
-What 3-4 specific searches would give the most useful information about this person's current priorities and company situation?"""
-        
-        search_plan = self._call_groq(search_plan_prompt)
-        print(f"Research plan:\n{search_plan}\n")
-        
-        # Step 2: Execute searches
-        print("[STEP 2] Executing smart searches...")
-        all_search_results = []
-        
-        # Generate specific queries that include person's context
-        specific_queries = SearchRefinement.generate_specific_queries(person)
-        generic_queries = [
-            f"{person.company} recent news",
-            f"{person.company} latest announcements"
+        # Define tools for Groq
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "tavily_search",
+                    "description": "Search the web. Use for finding recent news, interviews, company info. Search queries should contain ONLY: person name + company + research keywords. Never include meeting context.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "Search query with only person name, company, and research keywords"}
+                        },
+                        "required": ["query"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "jina_scrape",
+                    "description": "Read full content of a webpage. Use after searching to read articles, blogs, company pages.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string", "description": "URL to scrape"}
+                        },
+                        "required": ["url"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "save_briefing",
+                    "description": "Save the completed briefing. Only call this once you have gathered enough research.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "content": {"type": "string", "description": "Full briefing markdown content"},
+                            "name": {"type": "string", "description": "Person's name for filename"}
+                        },
+                        "required": ["content", "name"]
+                    }
+                }
+            }
         ]
         
-        all_queries = specific_queries + generic_queries
-        
-        # Search and validate
-        for query in all_queries[:3]:  # Limit to save credits
-            print(f"  [SEARCH] {query}")
-            results = self.search_tool.search(query, count=3)
-            
-            # Validate results match the person (for person-specific queries)
-            if person.name in query:
-                # Filter by relevance to this person
-                validated = ResultValidator.filter_results(results, person, min_score=0.4)
-                all_search_results.extend(validated)
-                
-                # Check for ambiguity
-                has_conflict, conflict_msg = AmbiguityResolver.has_conflict(validated, person)
-                if has_conflict:
-                    print(f"  [CONFLICT DETECTED] {conflict_msg}")
-                    print(f"  [RETRY] Searching more specifically...")
-            else:
-                # Company/org queries - accept all
-                all_search_results.extend(results)
-        
-        if not all_search_results:
-            print("[WARNING] No search results found")
-            return None
-        
-        # Remove duplicates
-        seen_urls = set()
-        unique_results = []
-        for result in all_search_results:
-            if result.url not in seen_urls:
-                seen_urls.add(result.url)
-                unique_results.append(result)
-        all_search_results = unique_results
-        
-        print(f"[SEARCH COMPLETE] Validated {len(all_search_results)} unique results")
-        
-        # Step 3: Extract social links & contact info from search results
-        print("[STEP 3] Extracting social profiles & contact info...")
-        social_links = {}
-        
-        # Direct extraction from URLs (most reliable)
-        for result in all_search_results:
-            # Extract from URL itself
-            if "linkedin" in result.url.lower():
-                if "linkedin" not in social_links:
-                    social_links["linkedin"] = []
-                social_links["linkedin"].append(result.url)
-            elif "twitter.com" in result.url.lower() or "x.com" in result.url.lower():
-                if "twitter" not in social_links:
-                    social_links["twitter"] = []
-                social_links["twitter"].append(result.url)
-            elif "instagram" in result.url.lower():
-                if "instagram" not in social_links:
-                    social_links["instagram"] = []
-                social_links["instagram"].append(result.url)
-            elif "github" in result.url.lower():
-                if "github" not in social_links:
-                    social_links["github"] = []
-                social_links["github"].append(result.url)
-        
-        # Also extract from combined text snippets
-        combined_text = " ".join([f"{r.title} {r.description}" for r in all_search_results])
-        text_extracted = LinkExtractor.extract_from_text(combined_text)
-        
-        # Merge with URL-based extractions (URL-based takes priority)
-        for platform, values in text_extracted.items():
-            if platform not in social_links:
-                social_links[platform] = []
-            social_links[platform].extend(values)
-        
-        # Remove duplicates
-        for platform in social_links:
-            social_links[platform] = list(dict.fromkeys(social_links[platform]))[:3]  # Keep unique, top 3
-        
-        # Display found links
-        if social_links:
-            print("[FOUND]")
-            for platform, links in social_links.items():
-                for link in links[:2]:  # Show top 2 per platform
-                    display_text = link if link.startswith("http") else f"@{link}"
-                    print(f"  • {platform.upper()}: {display_text[:70]}")
-        else:
-            print("[NO SOCIAL LINKS] Profiles may be private")
-        
-        # Step 4: Analyze which sources to scrape
-        print("[STEP 4] Analyzing which sources to scrape...")
-        results_formatted = format_search_results_for_claude(all_search_results[:5])
-        
-        scrape_decision_prompt = f"""Based on these search results, which URLs are most valuable to scrape for understanding {person.name}'s current thinking and their company's situation?
-
-{results_formatted}
-
-List the top 3-4 URLs to scrape, in order of usefulness."""
-        
-        scrape_decision = self._call_groq(scrape_decision_prompt)
-        print(f"URLs to scrape:\n{scrape_decision}\n")
-        
-        # Step 5 & 6: Use search results as primary content source
-        print("[STEP 5] Processing search results as content...")
-        scraped_contents = []
-        
-        # Convert search results directly to content with fallback scraping
-        for result in all_search_results[:8]:
-            # Try scraping first
-            scraped = self.scrape_tool.scrape(result.url, fallback_snippet=result.description)
-            
-            # If scraping failed or returned empty, use search snippet
-            if not scraped or not scraped.content or len(scraped.content) < 20:
-                scraped_content = ScrapedContent(
-                    url=result.url,
-                    title=result.title,
-                    content=result.description,  # Use search snippet as content
-                    timestamp=datetime.now().isoformat()
-                )
-            else:
-                scraped_content = scraped
-            
-            if scraped_content.content:
-                scraped_contents.append(scraped_content)
-        
-        print(f"[CONTENT READY] Collected {len(scraped_contents)} sources with content")
-        
-        if not scraped_contents:
-            print("[ERROR] Completely unable to gather content")
-            return None
-        
-        # Step 6: Synthesize into briefing
-        print("[STEP 6] Synthesizing briefing...")
-        
-        content_summary = "\n\n".join([
-            format_scraped_content_for_claude(c) for c in scraped_contents
-        ])
-        
-        synthesis_prompt = f"""Based on this research about {person.name}, create a focused briefing.
-
-Person: {person.name}, {person.role} at {person.company}
+        # Initial system message
+        initial_prompt = f"""You are researching: {person.name}
+Role: {person.role}
+Company: {person.company}
 Meeting Context: {person.context}
 
-Research findings:
-{content_summary}
+Use the tools to find current information about this person. Run at least 4 searches and scrape at least 2 pages before writing the briefing.
 
-Generate the briefing in this JSON format:
-{{
-    "who_they_are": "2-sentence human description",
-    "what_they_care_about": "What they're focused on now",
-    "company_situation": "Company stage and current focus",
-    "meeting_approach": "How to approach them given the context",
-    "smart_questions": ["Q1", "Q2", "Q3"],
-    "things_to_avoid": ["A1", "A2"],
-    "icebreaker": "Specific recent thing to mention"
-}}"""
+Remember critical rules:
+- Search queries contain ONLY person name, company, and research keywords - NEVER include "{person.context}" in searches
+- Run searches in this order:
+  1. {person.name} {person.company} 2026
+  2. {person.name} interview OR podcast 2025 OR 2026
+  3. {person.company} news OR announcement 2026
+  4. {person.company} engineering blog OR tech blog
+  5. {person.company} jobs hiring 2026
+  6. site:linkedin.com {person.name} {person.company}
+- Scrape at least 2 different URLs to get quality content
+- Create a briefing following the exact OUTPUT STRUCTURE from your system prompt
+- Include a Research Confidence section tracking searches run and pages scraped
+- End by calling save_briefing with the complete markdown content"""
+
+        self.messages = [
+            {"role": "user", "content": initial_prompt}
+        ]
         
-        briefing_json_str = self._call_groq(synthesis_prompt)
+        # Agentic loop
+        loop_count = 0
+        max_loops = 20  # Prevent infinite loops
         
-        # Parse JSON from response (handle markdown wrapping)
-        try:
-            # Try direct JSON parsing
-            briefing_data = json.loads(briefing_json_str)
-        except json.JSONDecodeError:
-            # Try to extract JSON from markdown code blocks
-            try:
-                if "```json" in briefing_json_str:
-                    json_part = briefing_json_str.split("```json")[1].split("```")[0].strip()
-                elif "```" in briefing_json_str:
-                    json_part = briefing_json_str.split("```")[1].split("```")[0].strip()
-                else:
-                    # Try to find JSON object between { and }
-                    start = briefing_json_str.find("{")
-                    end = briefing_json_str.rfind("}") + 1
-                    json_part = briefing_json_str[start:end]
-                
-                briefing_data = json.loads(json_part)
-            except:
-                print("[ERROR] Could not parse briefing JSON:")
-                print(briefing_json_str[:500])
-                return None
-        
-        # Step 7: Create briefing object
-        briefing = Briefing(
-            person=person,
-            who_they_are=briefing_data.get("who_they_are", ""),
-            what_they_care_about=briefing_data.get("what_they_care_about", ""),
-            company_situation=briefing_data.get("company_situation", ""),
-            meeting_approach=briefing_data.get("meeting_approach", ""),
-            smart_questions=briefing_data.get("smart_questions", []),
-            things_to_avoid=briefing_data.get("things_to_avoid", []),
-            icebreaker=briefing_data.get("icebreaker", ""),
-            sources=[r.url for r in all_search_results[:5]],
-            timestamp=datetime.now().isoformat(),
-            social_links=social_links  # Add social links
-        )
-        
-        # Step 8: Validate briefing quality
-        print("[STEP 8] Validating briefing quality...")
-        is_valid, issues = BriefingValidator.validate_briefing(briefing)
-        quality_score = BriefingValidator.get_quality_score(briefing)
-        print(f"[QUALITY] Score: {quality_score:.0f}/100")
-        
-        # If quality too low, attempt to improve
-        should_retry, retry_reason = BriefingValidator.should_retry(briefing, min_quality=65.0)
-        
-        if should_retry and len(all_search_results) >= 4:
-            print(f"[RETRY NEEDED] {retry_reason}")
-            print("[ATTEMPTING RECOVERY] Re-synthesizing with expanded context...")
+        while loop_count < max_loops:
+            loop_count += 1
+            print(f"[LOOP {loop_count}] Calling Groq with tool definitions...")
             
-            # Gather more detailed context
-            extended_context = "Additional guidance:\n"
-            for issue in issues[:3]:
-                extended_context += f"- {issue}\n"
+            # Call Groq with tools
+            response = self._call_groq_with_tools(self.messages, tools)
             
-            retry_synthesis_prompt = synthesis_prompt + f"\n\nIMPORTANT: {extended_context}"
-            retry_json_str = self._call_groq(retry_synthesis_prompt)
+            # Extract message and tool calls
+            message_content = response["choices"][0]["message"]
             
-            try:
-                if "```json" in retry_json_str:
-                    json_part = retry_json_str.split("```json")[1].split("```")[0].strip()
-                elif "```" in retry_json_str:
-                    json_part = retry_json_str.split("```")[1].split("```")[0].strip()
-                else:
-                    start = retry_json_str.find("{")
-                    end = retry_json_str.rfind("}") + 1
-                    json_part = retry_json_str[start:end]
+            # Add assistant message to conversation
+            self.messages.append({
+                "role": "assistant",
+                "content": message_content.get("content", "")
+            })
+            
+            # Check for tool calls
+            tool_calls = message_content.get("tool_calls", [])
+            
+            if not tool_calls:
+                # No more tool calls - Groq is done
+                print("\n[AGENT COMPLETE] Groq finished research")
                 
-                retry_data = json.loads(json_part)
+                # Extract final briefing from last message
+                final_content = message_content.get("content", "")
                 
-                # Create new briefing with retry data
+                if final_content:
+                    # Save it if not already saved via tool call
+                    if "save_briefing" not in str(tool_calls):
+                        filename = f"briefing_{person.name.replace(' ', '_').lower()}_{datetime.now().strftime('%Y-%m-%d')}.md"
+                        self.file_tool.save_briefing(filename, final_content, OUTPUT_DIR)
+                        print(f"[SAVE] {filename}")
+                
+                # Build briefing object with metadata
                 briefing = Briefing(
-                    person=person,
-                    who_they_are=retry_data.get("who_they_are", briefing.who_they_are),
-                    what_they_care_about=retry_data.get("what_they_care_about", briefing.what_they_care_about),
-                    company_situation=retry_data.get("company_situation", briefing.company_situation),
-                    meeting_approach=retry_data.get("meeting_approach", briefing.meeting_approach),
-                    smart_questions=retry_data.get("smart_questions", briefing.smart_questions),
-                    things_to_avoid=retry_data.get("things_to_avoid", briefing.things_to_avoid),
-                    icebreaker=retry_data.get("icebreaker", briefing.icebreaker),
-                    sources=briefing.sources,
-                    timestamp=datetime.now().isoformat(),
-                    social_links=social_links
+                    who_they_are=final_content[:500],
+                    what_they_care_about=final_content[500:1000],
+                    company_situation=final_content[1000:1500],
+                    meeting_approach=final_content[1500:2000],
+                    smart_questions=["See full briefing for details"],
+                    things_to_avoid=["See full briefing for details"],
+                    icebreaker=final_content[2000:2200],
+                    sources=[f"Research completed with {self.search_count} searches and {self.scrape_success} successful scrapes"],
+                    timestamp=datetime.now().isoformat()
                 )
                 
-                # Validate again
-                is_valid, issues = BriefingValidator.validate_briefing(briefing)
-                quality_score = BriefingValidator.get_quality_score(briefing)
-                print(f"[RECOVERY] New quality score: {quality_score:.0f}/100")
+                return briefing
+            
+            # Execute tool calls
+            print(f"[TOOLS] Executing {len(tool_calls)} tool calls...")
+            tool_results = []
+            
+            for tool_call in tool_calls:
+                tool_name = tool_call["function"]["name"]
+                arguments = json.loads(tool_call["function"]["arguments"])
                 
-            except:
-                print("[RECOVERY FAILED] Using original briefing")
+                print(f"  → {tool_name}")
+                result = self._execute_tool(tool_name, arguments)
+                
+                tool_results.append({
+                    "tool_call_id": tool_call["id"],
+                    "tool_name": tool_name,
+                    "result": result
+                })
+            
+            # Add tool results to messages
+            for tool_result in tool_results:
+                self.messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_result["tool_call_id"],
+                    "content": tool_result["result"]
+                })
+            
+            print(f"[STATS] Searches: {self.search_count}, Scrapes: {self.scrape_count}, Successful: {self.scrape_success}\n")
         
-        # Step 9: Save briefing
-        print("[STEP 9] Saving briefing...")
-        filename = f"briefing_{person.name.replace(' ', '_').lower()}_{datetime.now().strftime('%Y-%m-%d')}.md"
-        markdown = briefing.to_markdown()
-        self.file_tool.save_briefing(filename, markdown, OUTPUT_DIR)
-        
-        # Cache it
-        self.cache.set(person.name, person.role, briefing.to_dict())
-        
-        print(f"\n[DONE] Briefing ready!\n")
-        return briefing
+        print("[ERROR] Max loop count exceeded")
+        return None
+
 
 def main():
     """Entry point"""
     if len(sys.argv) < 3:
         print("Usage: python -m phase1_agent.main <name> <role> [company] [context]")
-        print("Example: python -m phase1_agent.main 'Satya Nadella' 'CEO' 'Microsoft' 'acquisition meeting'")
+        print("Example: python -m phase1_agent.main 'Albinder Dhindsa' 'CEO' 'Blinkit' 'I want to pitch supply chain tool'")
         sys.exit(1)
     
     name = sys.argv[1]
@@ -395,9 +318,14 @@ def main():
     
     if briefing:
         print("\n" + "="*60)
-        print("BRIEFING PREVIEW")
+        print("BRIEFING SAVED")
         print("="*60)
-        print(briefing.to_markdown()[:1000] + "...\n")
+        print(f"Research Summary:")
+        print(f"- Searches executed: {agent.search_count}")
+        print(f"- Pages scraped: {agent.scrape_count}")
+        print(f"- Successful scrapes: {agent.scrape_success}")
+        print(f"- Confidence: {'HIGH' if agent.scrape_success >= 2 else 'MEDIUM' if agent.scrape_success >= 1 else 'LOW'}")
+
 
 if __name__ == "__main__":
     main()
