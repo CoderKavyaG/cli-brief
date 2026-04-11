@@ -7,6 +7,7 @@ Intel briefing agent using local Ollama
 import sys
 import json
 import requests
+import time
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
@@ -31,32 +32,47 @@ class IntelAgent:
         self.conversation_history = []
     
     def _call_groq(self, prompt: str, system: str = SYSTEM_PROMPT) -> str:
-        """Call Groq API for fast LLM inference"""
-        try:
-            headers = {
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            response = requests.post(
-                GROQ_API_URL,
-                json={
-                    "model": GROQ_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": 0.7,
-                    "max_tokens": 2000
-                },
-                headers=headers,
-                timeout=30
-            )
-            response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
-        except Exception as e:
-            print(f"[GROQ ERROR] {str(e)}")
-            raise
+        """Call Groq API for fast LLM inference with exponential backoff"""
+        max_retries = 3
+        base_wait = 2
+        
+        for attempt in range(max_retries):
+            try:
+                headers = {
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json"
+                }
+                
+                response = requests.post(
+                    GROQ_API_URL,
+                    json={
+                        "model": GROQ_MODEL,
+                        "messages": [
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "temperature": 0.7,
+                        "max_tokens": 2000
+                    },
+                    headers=headers,
+                    timeout=30
+                )
+                response.raise_for_status()
+                return response.json()["choices"][0]["message"]["content"]
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 429:  # Rate limit
+                    if attempt < max_retries - 1:
+                        wait_time = base_wait * (2 ** attempt)  # Exponential backoff
+                        print(f"[GROQ RATE LIMIT] Retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                        time.sleep(wait_time)
+                        continue
+                print(f"[GROQ ERROR] {str(e)}")
+                raise
+            except Exception as e:
+                print(f"[GROQ ERROR] {str(e)}")
+                raise
+        
+        raise Exception(f"[GROQ ERROR] Max retries exceeded after {max_retries} attempts")
     
     def research(self, person: Person) -> Optional[Briefing]:
         """Main research loop"""

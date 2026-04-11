@@ -108,6 +108,17 @@ class FirecrawlScrape:
                 )
                 return content
             return None
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            print(f"[SCRAPE TIMEOUT] {type(e).__name__} - Using snippet fallback")
+            if fallback_snippet:
+                content = ScrapedContent(
+                    url=url,
+                    title="",
+                    content=fallback_snippet,
+                    timestamp=datetime.now().isoformat()
+                )
+                return content
+            return None
         except requests.exceptions.RequestException as e:
             print(f"[SCRAPE ERROR] {str(e)} - Using snippet fallback")
             if fallback_snippet:
