@@ -255,6 +255,7 @@ Remember critical rules:
                 
                 # Build briefing object with metadata
                 briefing = Briefing(
+                    person=person,
                     who_they_are=final_content[:500],
                     what_they_care_about=final_content[500:1000],
                     company_situation=final_content[1000:1500],
@@ -262,7 +263,7 @@ Remember critical rules:
                     smart_questions=["See full briefing for details"],
                     things_to_avoid=["See full briefing for details"],
                     icebreaker=final_content[2000:2200],
-                    sources=[f"Research completed with {self.search_count} searches and {self.scrape_success} successful scrapes"],
+                    sources=[f"Research: {self.search_count} searches, {self.scrape_success} scrapes"],
                     timestamp=datetime.now().isoformat()
                 )
                 
