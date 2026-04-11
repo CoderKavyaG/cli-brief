@@ -42,7 +42,7 @@ class TavilySearch:
                         source="Tavily Search"
                     )
                     results.append(result)
-                    print(f"  → {result.title[:60]}... ({result.url})")
+                    print(f"  - {result.title[:60]}... ({result.url})")
             
             print(f"[SEARCH DONE] Found {len(results)} results")
             return results
