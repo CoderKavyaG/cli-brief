@@ -73,6 +73,11 @@ class IntelAgent:
                         print(f"[GROQ RATE LIMIT] Retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
                         time.sleep(wait_time)
                         continue
+                if e.response.status_code == 400:
+                    # Provide more detail on 400 errors
+                    print(f"[GROQ 400 ERROR] Bad Request")
+                    print(f"[GROQ] Response: {e.response.text[:500]}")
+                    print(f"[GROQ] Payload size: {len(str(messages_to_send))} chars, {len(str(tools))} chars in tools")
                 print(f"[GROQ ERROR] {str(e)}")
                 raise
             except Exception as e:
@@ -173,48 +178,37 @@ class IntelAgent:
         # SYSTEM INSTRUCTIONS FOR GROQ
         system_message = f"""You are an Executive Briefing Specialist AI.
 
-YOUR CRITICAL RESPONSIBILITY:
-After researching, you must create a SYNTHESIZED executive briefing - NOT raw scraped content.
+CRITICAL - FOLLOW THESE RULES EXACTLY:
 
-REQUIRED FORMAT (Use THESE EXACT HEADERS - letter for letter):
-
-# Executive Briefing: [Full Name]
-
+1. Generate the briefing THEN call save_briefing
+2. Briefing format (use EXACTLY these headers):
+   
+# Executive Briefing: Name
 ## Who They Are
-[2-3 sentences about background, current role, career]
-
-## What They Care About
-- [Key interest 1]
-- [Key interest 2]  
-- [Key interest 3]
-
+Paragraph text here
+## What They Care About  
+Bullet list format
 ## Current Company Situation
-[2-3 sentences about company strategy and challenges]
-
+Paragraph text here
 ## Meeting Approach
-- Tone: [describe style]
-- Focus: [main topics]
-
+Bullet list format
 ## Smart Questions to Ask
-- [Question 1]
-- [Question 2]
-- [Question 3]
-
+Question 1
+Question 2  
+Question 3
 ## Things to Avoid
-- [Avoid 1]
-- [Avoid 2]
-- [Avoid 3]
-
+Point 1
+Point 2
+Point 3
 ## Icebreaker / Common Ground
-[1-2 sentences about connection point or achievement]
+Final thought here
 
-CRITICAL RULES - YOU MUST FOLLOW:
-1. Use the EXACT headers shown above - no substitutions or abbreviations
-2. Never copy-paste raw scraped content
-3. Synthesize and interpret what you research
-4. Be specific and factual
-5. Make it actionable
-6. When calling save_briefing, pass the complete formatted briefing"""
+3. Call save_briefing with this complete briefing
+4. Keep each section concise - 2-3 sentences or bullets maximum
+5. NO special characters, NO extra formatting - plain text only
+6. Keep content focused and brief
+
+START RESEARCHING NOW."""
         
         # Define tools for Groq
         tools = [
@@ -269,30 +263,22 @@ CRITICAL RULES - YOU MUST FOLLOW:
 Name: {person.name}
 Role: {person.role}
 Company: {person.company}
-Context: Preparing for a {person.context}
 
-CRITICAL - Your Final Task:
-You must call save_briefing with a SYNTHESIZED executive briefing (not raw scraped content).
-The briefing must follow the "# Executive Briefing:" format exactly.
-DO NOT pass raw scraped HTML/text to save_briefing - SYNTHESIZE insights.
+YOUR TASK:
+1. Search for information about this person (use tavily_search)
+2. Scrape 2-3 high-quality URLs (use jina_scrape)
+3. Create a briefing with these EXACT section headers:
+   - # Executive Briefing: [Full Name]
+   - ## Who They Are
+   - ## What They Care About
+   - ## Current Company Situation
+   - ## Meeting Approach
+   - ## Smart Questions to Ask
+   - ## Things to Avoid
+   - ## Icebreaker / Common Ground
+4. Call save_briefing with your complete briefing
 
-Search Strategy:
-1. "{person.name} {person.company} 2026" - Recent news
-2. "{person.name} interview OR podcast" - Personal insights  
-3. "{person.company} news OR announcement" - Company updates
-4. "{person.company} engineering" - Technical direction
-5. "site:linkedin.com {person.name}" - Professional profile
-
-Your Steps:
-1. ✓ Conduct 4-6 web searches
-2. ✓ Scrape 2-3 high-quality sources
-3. ✓ SYNTHESIZE: Create a briefing that INTERPRETS the research
-4. ✓ Call save_briefing with the formatted briefing
-
-Remember:
-- SYNTHESIZE, don't copy-paste
-- Briefing must have "# Executive Briefing:" at the top
-- Include all 8 sections: Who, What They Care, Company, Approach, Questions, Avoid, Icebreaker, Sources"""
+IMPORTANT: Use EXACTLY these section names - do not abbreviate or change them."""
 
         self.messages = [
             {"role": "user", "content": initial_prompt}
@@ -302,8 +288,8 @@ Remember:
         loop_count = 0
         max_loops = 20
         # Balance between maintaining context and avoiding payload size errors
-        # Keep enough for 1-2 research loops but trim to prevent 413 errors
-        max_msg_history = 20
+        # With large scrape results (60KB+), need to be conservative
+        max_msg_history = 12  # Reduced from 20 to avoid 400/413 errors
         
         while loop_count < max_loops:
             loop_count += 1
@@ -425,7 +411,7 @@ Remember:
                 self.messages.append({
                     "role": "tool",
                     "tool_call_id": tool_result["tool_call_id"],
-                    "content": tool_result["result"][:1200]
+                    "content": tool_result["result"][:600]  # Reduced from 1200 to minimize payload
                 })
             
             print(f"[STATS] Searches: {self.search_count}, Scrapes: {self.scrape_count}, Successful: {self.scrape_success}\n")
