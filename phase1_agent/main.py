@@ -276,7 +276,7 @@ Remember critical rules:
                 tool_name = tool_call["function"]["name"]
                 arguments = json.loads(tool_call["function"]["arguments"])
                 
-                print(f"  → {tool_name}")
+                print(f"  > {tool_name}")
                 result = self._execute_tool(tool_name, arguments)
                 
                 tool_results.append({
