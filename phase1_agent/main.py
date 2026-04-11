@@ -80,17 +80,17 @@ class IntelAgent:
                 query = arguments.get("query", "")
                 print(f"  [SEARCH] {query}")
                 self.search_count += 1
-                results = self.search_tool.search(query, count=3)
+                results = self.search_tool.search(query, count=2)
                 
-                # Format results
+                # Format results - compact to reduce payload
                 formatted = []
-                for r in results:
+                for r in results[:2]:
                     formatted.append({
-                        "title": r.title,
+                        "title": r.title[:70],
                         "url": r.url,
-                        "description": r.description
+                        "snippet": r.description[:80]
                     })
-                return json.dumps({"results": formatted, "count": len(formatted)})
+                return json.dumps({"results": formatted}, separators=(',', ':'))
             
             elif tool_name == "jina_scrape":
                 url = arguments.get("url", "")
@@ -104,15 +104,13 @@ class IntelAgent:
                     return json.dumps({
                         "success": True,
                         "url": url,
-                        "title": scraped.title,
-                        "content": scraped.content[:4000]
-                    })
+                        "content": scraped.content[:1000]
+                    }, separators=(',', ':'))
                 else:
                     return json.dumps({
                         "success": False,
-                        "url": url,
-                        "error": "Scrape failed or returned minimal content"
-                    })
+                        "url": url
+                    }, separators=(',', ':'))
             
             elif tool_name == "save_briefing":
                 content = arguments.get("content", "")
@@ -218,22 +216,24 @@ Remember critical rules:
         
         # Agentic loop
         loop_count = 0
-        max_loops = 20  # Prevent infinite loops
+        max_loops = 20
+        max_msg_history = 8  # Trim message history to prevent 413 payload errors
         
         while loop_count < max_loops:
             loop_count += 1
-            print(f"[LOOP {loop_count}] Calling Groq with tool definitions...")
+            print(f"[LOOP {loop_count}] Calling Groq...")
             
-            # Call Groq with tools
-            response = self._call_groq_with_tools(self.messages, tools)
+            # Trim messages to prevent payload too large errors
+            msgs_to_send = self.messages[-max_msg_history:] if len(self.messages) > max_msg_history else self.messages
             
-            # Extract message and tool calls
+            response = self._call_groq_with_tools(msgs_to_send, tools)
+            
             message_content = response["choices"][0]["message"]
             
-            # Add assistant message to conversation
+            # Add assistant response (truncated to save space)
             self.messages.append({
                 "role": "assistant",
-                "content": message_content.get("content", "")
+                "content": message_content.get("content", "")[:400]
             })
             
             # Check for tool calls
@@ -285,12 +285,12 @@ Remember critical rules:
                     "result": result
                 })
             
-            # Add tool results to messages
+            # Add tool results to messages (size-capped to prevent bloat)
             for tool_result in tool_results:
                 self.messages.append({
                     "role": "tool",
                     "tool_call_id": tool_result["tool_call_id"],
-                    "content": tool_result["result"]
+                    "content": tool_result["result"][:1200]
                 })
             
             print(f"[STATS] Searches: {self.search_count}, Scrapes: {self.scrape_count}, Successful: {self.scrape_success}\n")
