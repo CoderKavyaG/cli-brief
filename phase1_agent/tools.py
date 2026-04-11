@@ -56,7 +56,7 @@ class FirecrawlScrape:
     
     @staticmethod
     def scrape(url: str, fallback_snippet: str = "") -> Optional[ScrapedContent]:
-        """Scrape URL using Jina AI API"""
+        """Scrape URL using Jina AI API at r.jina.ai (no auth required)"""
         try:
             jina_url = f"https://r.jina.ai/{url}"
             response = requests.get(
@@ -68,15 +68,15 @@ class FirecrawlScrape:
                 timeout=20
             )
             if response.status_code == 200 and len(response.text.strip()) > 200:
-                print(f"[JINA OK] Got {len(response.text)} characters")
+                print(f"[JINA OK] Got {len(response.text)} chars from {url[:60]}...")
                 return ScrapedContent(
                     url=url,
                     title="",
-                    content=response.text[:3000],
+                    content=response.text,
                     timestamp=datetime.now().isoformat()
                 )
             else:
-                print(f"[JINA FAILED] Got {len(response.text)} chars, using snippet")
+                print(f"[JINA FAILED] {url[:60]}... - only {len(response.text)} chars")
                 if fallback_snippet:
                     return ScrapedContent(
                         url=url,
@@ -86,7 +86,7 @@ class FirecrawlScrape:
                     )
                 return None
         except Exception as e:
-            print(f"[JINA ERROR] {str(e)}")
+            print(f"[JINA ERROR] {url[:60]}... - {str(e)[:50]}")
             if fallback_snippet:
                 return ScrapedContent(
                     url=url,

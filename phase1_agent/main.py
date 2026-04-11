@@ -31,6 +31,7 @@ class IntelAgent:
         self.search_count = 0
         self.scrape_count = 0
         self.scrape_success = 0
+        self.scraped_contents = []  # Track all scraped content for synthesis
     
     def _call_groq_with_tools(self, messages: List[Dict], tools: List[Dict], system_message: str = None) -> Dict:
         """Call Groq API with tool calling support"""
@@ -135,16 +136,20 @@ class IntelAgent:
                 
                 if scraped and len(scraped.content) > 200:
                     self.scrape_success += 1
-                    # Cap scrape result to prevent payload issues
-                    content_capped = scraped.content[:800]
-                    # Ensure it doesn't break JSON by removing problematic chars
-                    content_capped = content_capped.replace('"', "'").replace('\n', ' ').replace('\r', '')
+                    # Keep substantial content for synthesis (3000 chars = ~600 words)
+                    content_capped = scraped.content[:3000]
+                    print(f"[DEBUG SCRAPE] {url}: {len(scraped.content)} total chars, keeping {len(content_capped)}")
+                    # Track this scraped content for synthesis
+                    self.scraped_contents.append(scraped)
+                    # Escape JSON but preserve structure (keep newlines for formatting)
+                    content_safe = content_capped.replace('\\', '\\\\').replace('"', '\\"')
                     return json.dumps({
                         "success": True,
                         "url": url,
-                        "content": content_capped
+                        "content": content_safe
                     }, separators=(',', ':'), ensure_ascii=True)
                 else:
+                    print(f"[JINA FAILED] {url}: got {len(scraped.content) if scraped else 0} chars")
                     return json.dumps({
                         "success": False,
                         "url": url
@@ -213,35 +218,39 @@ REQUIREMENTS:
 1. Use tavily_search to find information about the person
 2. Use jina_scrape to read the best URLs found in search results (2-3 URLs maximum)
 3. After gathering information, ALWAYS call the save_briefing tool with the complete briefing
-4. IMPORTANT: You MUST call save_briefing when ready - do NOT just generate text
+4. CRITICAL: Use ONLY the information from the tool results (scraped web content) in your briefing
+5. Do NOT use training data - base EVERY fact on the scraped research provided
+6. IMPORTANT: You MUST call save_briefing when ready - do NOT just generate text
 
 BRIEFING STRUCTURE (use these EXACT headers):
 # Executive Briefing: [Person Name]
 
 ## Who They Are
-[1-2 sentences about their role and background]
+[1-2 sentences from scraped research about their role and background]
 
 ## What They Care About
-[1-2 sentences about their interests and focus areas]
+[1-2 sentences from scraped research about their interests and focus areas]
 
 ## Current Company Situation
-[1-2 sentences about their company and current status]
+[1-2 sentences from scraped research about their company and current status]
 
 ## Meeting Approach
-[1-2 sentences about how to approach them]
+[1-2 sentences from scraped research about how to approach them]
 
 ## Smart Questions to Ask
-[1-2 sentences with suggested questions]
+[1-2 sentences with suggested questions based on scraped research]
 
 ## Things to Avoid
-[1-2 sentences about what to avoid]
+[1-2 sentences from scraped research about what to avoid]
 
 ## Icebreaker / Common Ground
-[1-2 sentences for starting the conversation]
+[1-2 sentences from scraped research for starting the conversation]
 
 CRITICAL: When you have gathered enough information, call save_briefing function with:
-- content: the complete briefing markdown (all 8 sections)
-- name: the person's full name"""
+- content: the complete briefing markdown (all 8 sections, based ONLY on scraped research)
+- name: the person's full name
+
+REMINDER: Use ONLY the scraped web content provided in tool results. Do NOT rely on training data."""
         
         # Define tools for Groq - OpenAI format
         tools = [
@@ -455,25 +464,32 @@ IMPORTANT: You MUST call save_briefing at the end. Do not just output text. Use 
                     )
                     return briefing
             
-            # Add tool results to messages (size-capped to prevent bloat)
+            # Add tool results to messages - preserve ALL content for synthesis
+            total_scrape_chars = 0
             for tool_result in tool_results:
-                # Ensure tool result content is valid JSON
                 result_content = tool_result["result"]
-                
-                # Truncate but preserve valid JSON structure
-                if len(result_content) > 400:
-                    # For JSON, try to truncate while keeping it valid
-                    truncated = result_content[:400]
-                    # Try to make it valid JSON by closing any open structures
-                    if truncated.count('{') > truncated.count('}'):
-                        truncated = truncated.rsplit(',', 1)[0] + '}'
-                    result_content = truncated
+                total_scrape_chars += len(result_content)
+                # IMPORTANT: Keep results intact - Groq needs full content to synthesize from research
+                # NOT truncating (was truncating to 400 chars - that was the bug!)
+                print(f"[DEBUG MESSAGE] Adding {tool_result['tool_name']}: {len(result_content)} chars to messages")
                 
                 self.messages.append({
                     "role": "tool",
                     "tool_call_id": tool_result["tool_call_id"],
                     "content": result_content
                 })
+            
+            # Build scraped_text from all collected scrapes for synthesis visibility
+            scraped_text = "\n\n".join([
+                f"SOURCE: {s.url}\nCONTENT: {s.content[:2000]}"
+                for s in self.scraped_contents
+                if s.content and len(s.content) > 100
+            ])
+            
+            print(f"[DEBUG SYNTHESIS] {len(self.scraped_contents)} sources, {len(scraped_text)} total chars collected")
+            if len(scraped_text) < 500:
+                print("[WARNING] Very little research content - briefing may be low quality")
+            print(f"[DEBUG TOTAL CONTENT] {total_scrape_chars} chars of research now in messages sent to Groq")
             
             print(f"[STATS] Searches: {self.search_count}, Scrapes: {self.scrape_count}, Successful: {self.scrape_success}\n")
         
