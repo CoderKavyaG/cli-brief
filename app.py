@@ -647,6 +647,22 @@ def index():
 def research():
     """Execute research and return briefing"""
     try:
+        # First, check if API keys are configured
+        from phase1_agent.config import TAVILY_API_KEY, FIRECRAWL_API_KEY, GROQ_API_KEY
+        
+        missing_keys = []
+        if not TAVILY_API_KEY:
+            missing_keys.append("TAVILY_API_KEY")
+        if not FIRECRAWL_API_KEY:
+            missing_keys.append("FIRECRAWL_API_KEY")
+        if not GROQ_API_KEY:
+            missing_keys.append("GROQ_API_KEY")
+        
+        if missing_keys:
+            error_msg = f"Missing API keys on server: {', '.join(missing_keys)}. Server admin needs to set environment variables in deployment dashboard."
+            print(f"[ERROR] {error_msg}")
+            return jsonify({"error": error_msg}), 500
+        
         data = request.get_json()
         
         if not data:
@@ -665,15 +681,29 @@ def research():
         agent = IntelAgent()
         
         print(f"\n[WEB] Researching: {person.name} ({person.role}) at {person.company}")
-        briefing = agent.research(person)
+        print(f"[WEB] Starting research...")
+        
+        try:
+            briefing = agent.research(person)
+        except Exception as research_error:
+            print(f"[ERROR] Research exception: {str(research_error)}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({"error": f"Research error: {str(research_error)}"}), 500
         
         if not briefing:
-            return jsonify({"error": "Research failed - insufficient data found"}), 500
+            print(f"[ERROR] Research returned None - agent failed to complete research loop")
+            return jsonify({"error": "Research failed - no data found. Check server logs for details."}), 500
         
         # Get the markdown file content
         files = list(Path('output').glob(f'briefing_{name.replace(" ", "_").lower()}*.md'))
         if not files:
-            return jsonify({"error": "Briefing file not created"}), 500
+            print(f"[ERROR] No briefing file found in output directory")
+            print(f"[DEBUG] Looking for: briefing_{name.replace(' ', '_').lower()}*.md")
+            print(f"[DEBUG] Output directory exists: {Path('output').exists()}")
+            if Path('output').exists():
+                print(f"[DEBUG] Files in output directory: {list(Path('output').glob('*'))}")
+            return jsonify({"error": "Briefing file not created - research may have failed silently"}), 500
         
         briefing_file = sorted(files)[-1]  # Get most recent
         with open(briefing_file, 'r', encoding='utf-8') as f:
@@ -741,6 +771,37 @@ def research():
 if __name__ == '__main__':
     # Create output directory if it doesn't exist
     Path('output').mkdir(exist_ok=True)
+    
+    # Validate API keys at startup
+    from phase1_agent.config import TAVILY_API_KEY, FIRECRAWL_API_KEY, GROQ_API_KEY, GROQ_MODEL
+    
+    print("\n" + "="*60)
+    print("FLASK APP STARTUP CHECK")
+    print("="*60)
+    
+    api_status = {
+        "TAVILY_API_KEY": "✓ Set" if TAVILY_API_KEY else "✗ MISSING",
+        "FIRECRAWL_API_KEY": "✓ Set" if FIRECRAWL_API_KEY else "✗ MISSING",
+        "GROQ_API_KEY": "✓ Set" if GROQ_API_KEY else "✗ MISSING",
+        "GROQ_MODEL": f"✓ {GROQ_MODEL}" if GROQ_MODEL else "✗ MISSING"
+    }
+    
+    for key, status in api_status.items():
+        print(f"  {key}: {status}")
+    
+    if not all([TAVILY_API_KEY, FIRECRAWL_API_KEY, GROQ_API_KEY]):
+        print("\n⚠️  WARNING: Some API keys are missing!")
+        print("   If deploying to Railway/Render:")
+        print("   1. Go to your deployment dashboard")
+        print("   2. Add environment variables:")
+        print("      - TAVILY_API_KEY")
+        print("      - FIRECRAWL_API_KEY")
+        print("      - GROQ_API_KEY")
+        print("   3. Redeploy the application")
+    else:
+        print("\n✓ All API keys configured. Ready to research!")
+    
+    print("="*60 + "\n")
     
     # Read port from environment (Railway/Render set this)
     # Default to 5000 for local development
