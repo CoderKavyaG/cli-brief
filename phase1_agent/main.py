@@ -432,39 +432,34 @@ Role: {person.role}
 Company: {person.company}
 Context: {person.context}
 
-YOUR RESEARCH STRATEGY - GO DEEP:
-1. SEARCH PHASE (call tavily_search 3 times for comprehensive coverage):
-   - Search 1: "{person.name} LinkedIn" - find LinkedIn profile
-   - Search 2: "{person.name} {person.company}" - find company connections
-   - Search 3: "{person.name}  site:github.com OR site:twitter.com OR site:personal" - find social/personal sites
-   - For EACH search result that mentions {person.name}, add it to your scrape list
+YOUR RESEARCH STRATEGY:
+1. SEARCH CAREFULLY (call tavily_search 2 times with SPECIFIC queries):
+   - Search 1: "{person.name} LinkedIn" - to find professional profile
+   - Search 2: "{person.name} {person.company}" - to find company info
+   - ONLY use results that ACTUALLY mention {person.name} - ignore generic articles
 
-2. SCRAPE & VERIFY (call jina_scrape 3-5 times for deep research):
-   - SCRAPE every URL that mentions {person.name}
-   - Priority order: LinkedIn → GitHub → personal site → company site → news about them
-   - Extract: Full bio, job history, skills, social handles, projects, achievements
-   - Link all the pieces together
+2. VERIFY SOURCES (call jina_scrape 2-3 times):
+   - Check that scraped content ACTUALLY contains about {person.name}
+   - Prefer: LinkedIn profiles, company websites, personal sites
+   - Avoid: Generic news sites that don't mention this person
 
-3. SYNTHESIS - REQUIRED (call save_briefing ONCE with complete briefing):
-   - You MUST call save_briefing when done, NOT just generate text
-   - This is non-negotiable - the tool call is mandatory
-   - Create the briefing with EXACT section headers:
-     * # Executive Briefing: {person.name}
-     * ## Who They Are
-     * ## What They Care About
-     * ## Current Company Situation
-     * ## Meeting Approach
-     * ## Smart Questions to Ask
-     * ## Things to Avoid
-     * ## Icebreaker / Common Ground
+3. Create the briefing with these EXACT section headers:
+   - # Executive Briefing: {person.name}
+   - ## Who They Are
+   - ## What They Care About
+   - ## Current Company Situation
+   - ## Meeting Approach
+   - ## Smart Questions to Ask
+   - ## Things to Avoid
+   - ## Icebreaker / Common Ground
 
-CRITICAL RULES:
-- Every sentence must end with [Source: domain.com]
-- Find and mention specific facts: role, skills, achievements, interests
-- Look for personal links in profiles (LinkedIn bio, personal site, etc.)
-- Do NOT use training data - base EVERYTHING on scraped research
-- If not found, write [NOT FOUND]
-- MUST CALL SAVE_BRIEFING - do not exit without calling this tool"""
+4. CRITICAL: Call save_briefing with complete content and name
+
+QUALITY RULES:
+- Only include facts you found in scraped content
+- Every sentence must have [Source: domain.com]
+- Don't use any training data about this person
+- If not found in research, write [NOT FOUND]"""
 
         self.messages = [
             {"role": "user", "content": initial_prompt}
@@ -472,8 +467,8 @@ CRITICAL RULES:
         
         # Agentic loop
         loop_count = 0
-        max_loops = 5  # Increased to 5 to allow deeper research with multiple searches/scrapes
-        max_msg_history = 6  # Increased to keep more context for synthesis
+        max_loops = 3  # Reduced from 5 - fewer API calls = less rate limiting
+        max_msg_history = 4  # Keep only most recent messages to minimize payload
         
         while loop_count < max_loops:
             loop_count += 1
