@@ -1,0 +1,52 @@
+[Unit]
+Description=Meeting Intelligence Agent API Server
+Documentation=https://github.com/CoderKavyaG/cli-brief
+After=network.target
+
+[Service]
+Type=notify
+User=briefing-agent
+Group=briefing-agent
+
+# Working directory
+WorkingDirectory=/opt/briefing-agent
+
+# Environment
+EnvironmentFile=/opt/briefing-agent/.env
+Environment="PATH=/opt/briefing-agent/venv/bin"
+
+# Start command
+ExecStart=/opt/briefing-agent/venv/bin/gunicorn \
+    --bind unix:/run/briefing-agent/socket \
+    --workers 4 \
+    --worker-class sync \
+    --timeout 120 \
+    --access-logfile /var/log/briefing-agent/access.log \
+    --error-logfile /var/log/briefing-agent/error.log \
+    --log-level info \
+    app:app
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=3
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/log/briefing-agent /opt/briefing-agent/data /opt/briefing-agent/output
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=512
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=briefing-agent
+
+[Install]
+WantedBy=multi-user.target
