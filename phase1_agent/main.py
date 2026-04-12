@@ -37,6 +37,10 @@ class IntelAgent:
         """Scan scraped content for high-signal events and return alerts"""
         alerts = []
         
+        # Extract first and last name for better matching
+        name_parts = person_name.lower().split()
+        first_name = name_parts[0] if name_parts else ""
+        
         role_keywords = ["resigned", "stepping down", "new ceo", 
                          "appointed as", "leaving", "departed", 
                          "replaced by", "transition", "steps down"]
@@ -64,18 +68,24 @@ class IntelAgent:
             for sentence in sentences:
                 sentence_lower = sentence.lower()
                 
+                # IMPORTANT: Only create alerts if the person's name is ACTUALLY mentioned
+                # This prevents alerts about unrelated tech news
+                has_name = first_name in sentence_lower or person_name.lower() in sentence_lower
+                
+                if not has_name:
+                    continue  # Skip this sentence if person not mentioned
+                
                 # Check role changes
                 if any(kw in sentence_lower for kw in role_keywords):
-                    if person_name.lower().split()[0] in sentence_lower:
-                        alerts.append({
-                            "type": "role_change",
-                            "emoji": "🚨",
-                            "label": "ROLE CHANGE DETECTED",
-                            "text": sentence.strip()[:200],
-                            "source": domain,
-                            "url": source.url,
-                            "priority": 1
-                        })
+                    alerts.append({
+                        "type": "role_change",
+                        "emoji": "🚨",
+                        "label": "ROLE CHANGE DETECTED",
+                        "text": sentence.strip()[:200],
+                        "source": domain,
+                        "url": source.url,
+                        "priority": 1
+                    })
                 
                 # Check funding
                 if any(kw in sentence_lower for kw in funding_keywords):
@@ -91,16 +101,15 @@ class IntelAgent:
                 
                 # Check controversy
                 if any(kw in sentence_lower for kw in controversy_keywords):
-                    if person_name.lower().split()[0] in sentence_lower:
-                        alerts.append({
-                            "type": "controversy",
-                            "emoji": "⚠️",
-                            "label": "CONTROVERSY FLAGGED", 
-                            "text": sentence.strip()[:200],
-                            "source": domain,
-                            "url": source.url,
-                            "priority": 1
-                        })
+                    alerts.append({
+                        "type": "controversy",
+                        "emoji": "⚠️",
+                        "label": "CONTROVERSY FLAGGED", 
+                        "text": sentence.strip()[:200],
+                        "source": domain,
+                        "url": source.url,
+                        "priority": 1
+                    })
                 
                 # Check launches
                 if any(kw in sentence_lower for kw in launch_keywords):
@@ -338,14 +347,20 @@ class IntelAgent:
         system_message_research = f"""You are an Executive Briefing Specialist AI. Your task is to research a person and create an executive briefing.
 
 REQUIREMENTS:
-1. Use tavily_search to find information about the person
+1. SEARCH STRATEGY - Use tavily_search with SPECIFIC queries to find the person:
+   - First search: "{person.name} LinkedIn" - find their professional profile
+   - Second search: "{person.name} {person.company}" - find company-related info
+   - Only use results that ACTUALLY mention {person.name} - ignore generic articles
 2. Use jina_scrape to read the best URLs found in search results (2-3 URLs maximum)
-3. After gathering information, ALWAYS call the save_briefing tool with the complete briefing
-4. CRITICAL: Use ONLY the information from the tool results (scraped web content) in your briefing
-5. Do NOT use training data - base EVERY fact on the scraped research provided
-6. IMPORTANT: You MUST call save_briefing when ready - do NOT just generate text
-7. CRITICAL: Every factual sentence must end with [Source: domain.com]
-8. If you cannot find a fact in the research provided, write [NOT FOUND]"""
+   - PRIORITY DOMAINS: linkedin.com, github.com, {person.company if person.company not in ['Unknown', 'N/A'] else 'company website'}
+   - AVOID: Generic news sites, unrelated content
+3. VERIFY: After scraping, check that content actually mentions {person.name}
+4. After gathering verified information, ALWAYS call save_briefing tool with the complete briefing
+5. CRITICAL: Use ONLY the information from the tool results (scraped web content) in your briefing
+6. Do NOT use training data - base EVERY fact on the scraped research provided
+7. IMPORTANT: You MUST call save_briefing when ready - do NOT just generate text
+8. CRITICAL: Every factual sentence must end with [Source: domain.com]
+9. If you cannot find verified information, write [NOT FOUND]"""
         
         # Start with research phase
         system_message = system_message_research
@@ -415,12 +430,20 @@ REQUIREMENTS:
 Name: {person.name}
 Role: {person.role}
 Company: {person.company}
+Context: {person.context}
 
-YOUR TASK:
-1. Search for information (call tavily_search 1-2 times)
-2. Scrape URLs (call jina_scrape 2-3 times with URLs from search results)
-3. Read the information you gathered
-4. Create the briefing with these EXACT section headers:
+YOUR RESEARCH STRATEGY:
+1. SEARCH CAREFULLY (call tavily_search 2 times with SPECIFIC queries):
+   - Search 1: "{person.name} LinkedIn" - to find professional profile
+   - Search 2: "{person.name} {person.company}" - to find company info
+   - ONLY use results that ACTUALLY mention {person.name} - ignore generic articles
+
+2. VERIFY SOURCES (call jina_scrape 2-3 times):
+   - Check that scraped content ACTUALLY contains about {person.name}
+   - Prefer: LinkedIn profiles, company websites, personal sites
+   - Avoid: Generic news sites that don't mention this person
+
+3. Create the briefing with these EXACT section headers:
    - # Executive Briefing: {person.name}
    - ## Who They Are
    - ## What They Care About
@@ -429,9 +452,14 @@ YOUR TASK:
    - ## Smart Questions to Ask
    - ## Things to Avoid
    - ## Icebreaker / Common Ground
-5. Call save_briefing with content and name
 
-IMPORTANT: You MUST call save_briefing at the end. Do not just output text. Use the save_briefing function."""
+4. CRITICAL: Call save_briefing with complete content and name
+
+QUALITY RULES:
+- Only include facts you found in scraped content
+- Every sentence must have [Source: domain.com]
+- Don't use any training data about this person
+- If not found in research, write [NOT FOUND]"""
 
         self.messages = [
             {"role": "user", "content": initial_prompt}
