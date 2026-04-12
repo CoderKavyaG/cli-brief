@@ -12,6 +12,7 @@ import os
 import re
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import urlparse
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
@@ -257,6 +258,79 @@ HTML_TEMPLATE = """
             border: 1px solid #f5c6cb;
         }
         
+        .context-banner {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 10px 14px;
+            font-size: 13px;
+            color: #495057;
+            margin-bottom: 20px;
+        }
+        
+        .alerts-container {
+            margin-bottom: 24px;
+        }
+        
+        .alert-box {
+            border-radius: 8px;
+            padding: 14px 16px;
+            margin-bottom: 12px;
+            border-left: 4px solid;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .alert-role {
+            background: #fef2f2;
+            border-color: #ef4444;
+            color: #991b1b;
+        }
+        
+        .alert-funding {
+            background: #f0fdf4;
+            border-color: #22c55e;
+            color: #166534;
+        }
+        
+        .alert-controversy {
+            background: #fff7ed;
+            border-color: #f97316;
+            color: #9a3412;
+        }
+        
+        .alert-launch {
+            background: #eff6ff;
+            border-color: #3b82f6;
+            color: #1e40af;
+        }
+        
+        .alert-label {
+            font-weight: 700;
+            font-size: 12px;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            display: block;
+            margin-bottom: 6px;
+            opacity: 0.85;
+        }
+        
+        .alert-source {
+            font-size: 11px;
+            opacity: 0.7;
+            margin-top: 8px;
+            display: block;
+        }
+        
+        .alert-source a {
+            color: inherit;
+            text-decoration: underline;
+        }
+        
+        .alert-source a:hover {
+            opacity: 1;
+        }
+        
         .action-buttons {
             display: flex;
             gap: 10px;
@@ -447,10 +521,40 @@ HTML_TEMPLATE = """
                 lastBriefingMarkdown = data.markdown;
                 lastPersonName = name;
                 
+                // Build alerts and context HTML
+                const alertTypeMap = {
+                    "role_change": "alert-role",
+                    "funding": "alert-funding", 
+                    "controversy": "alert-controversy",
+                    "launch": "alert-launch"
+                };
+                
+                let renderHTML = '';
+                
+                // Add context banner
+                renderHTML += `<div class="context-banner">📋 Meeting context: ${data.context}</div>`;
+                
+                // Render alerts
+                if (data.alerts && data.alerts.length > 0) {
+                    renderHTML += '<div class="alerts-container">';
+                    for (const alert of data.alerts) {
+                        const cssClass = alertTypeMap[alert.type] || 'alert-box';
+                        renderHTML += `<div class="alert-box ${cssClass}">`;
+                        renderHTML += `<span class="alert-label">${alert.emoji} ${alert.label}</span>`;
+                        renderHTML += `<span>${alert.text}</span>`;
+                        renderHTML += `<span class="alert-source">Source: <a href="${alert.url}" target="_blank">${alert.source}</a></span>`;
+                        renderHTML += '</div>';
+                    }
+                    renderHTML += '</div>';
+                }
+                
+                // Add briefing content
+                renderHTML += data.html;
+                
                 // Show briefing
                 document.getElementById('loading-container').style.display = 'none';
                 document.getElementById('briefing-container').style.display = 'block';
-                document.getElementById('briefing-content').innerHTML = data.html;
+                document.getElementById('briefing-content').innerHTML = renderHTML;
                 
             } catch (error) {
                 console.error('Error:', error);
@@ -499,11 +603,19 @@ def extract_confidence_level(html_content: str) -> str:
 
 
 def style_source_badges(html_content: str) -> str:
-    """Convert [Source: domain.com] tags to styled badges"""
+    """Convert [Source: URL] tags to styled badges with just domain name"""
     # Match [Source: anything] pattern
     def replace_badge(match):
-        source_text = match.group(1)
-        return f'<span class="source-badge">{source_text}</span>'
+        source_text = match.group(1).strip()
+        # Try to extract domain from URL
+        try:
+            if source_text.startswith('http'):
+                domain = urlparse(source_text).netloc.replace('www.', '')
+            else:
+                domain = source_text
+            return f'<span class="source-badge">{domain}</span>'
+        except:
+            return f'<span class="source-badge">{source_text}</span>'
     
     html_content = re.sub(r'\[Source: ([^\]]+)\]', replace_badge, html_content)
     return html_content
@@ -574,12 +686,27 @@ def research():
         html_content = style_source_badges(html_content)
         html_content = add_confidence_badge(html_content)
         
+        # Get alerts from briefing
+        alerts_data = []
+        if hasattr(briefing, 'alerts') and briefing.alerts:
+            for alert in briefing.alerts:
+                alerts_data.append({
+                    "type": alert.get("type", ""),
+                    "emoji": alert.get("emoji", ""),
+                    "label": alert.get("label", ""),
+                    "text": alert.get("text", ""),
+                    "source": alert.get("source", ""),
+                    "url": alert.get("url", "")
+                })
+        
         return jsonify({
             "success": True,
             "html": html_content,
             "markdown": markdown_content,
             "person": name,
-            "company": company
+            "company": company,
+            "context": context,
+            "alerts": alerts_data
         })
     
     except Exception as e:

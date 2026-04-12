@@ -33,6 +33,103 @@ class IntelAgent:
         self.scrape_success = 0
         self.scraped_contents = []  # Track all scraped content for synthesis
     
+    def detect_alerts(self, scraped_contents, person_name):
+        """Scan scraped content for high-signal events and return alerts"""
+        alerts = []
+        
+        role_keywords = ["resigned", "stepping down", "new ceo", 
+                         "appointed as", "leaving", "departed", 
+                         "replaced by", "transition", "steps down"]
+        
+        funding_keywords = ["raised", "funding round", "valuation", 
+                            "series a", "series b", "series c",
+                            "billion", "ipo", "acquisition", "acquired"]
+        
+        controversy_keywords = ["lawsuit", "controversy", "fired", 
+                                "scandal", "investigation", "charged",
+                                "alleged", "backlash", "criticism",
+                                "arrested", "fraud", "accused"]
+        
+        launch_keywords = ["launched", "announced", "unveiled", 
+                           "introducing", "new product", "new feature",
+                           "beta", "released", "just launched"]
+        
+        for source in scraped_contents:
+            content_lower = source.content.lower()
+            domain = source.url.split('/')[2].replace('www.', '')
+            
+            # Get the sentence containing the keyword
+            sentences = source.content.split('.')
+            
+            for sentence in sentences:
+                sentence_lower = sentence.lower()
+                
+                # Check role changes
+                if any(kw in sentence_lower for kw in role_keywords):
+                    if person_name.lower().split()[0] in sentence_lower:
+                        alerts.append({
+                            "type": "role_change",
+                            "emoji": "🚨",
+                            "label": "ROLE CHANGE DETECTED",
+                            "text": sentence.strip()[:200],
+                            "source": domain,
+                            "url": source.url,
+                            "priority": 1
+                        })
+                
+                # Check funding
+                if any(kw in sentence_lower for kw in funding_keywords):
+                    alerts.append({
+                        "type": "funding",
+                        "emoji": "💰", 
+                        "label": "FUNDING EVENT",
+                        "text": sentence.strip()[:200],
+                        "source": domain,
+                        "url": source.url,
+                        "priority": 2
+                    })
+                
+                # Check controversy
+                if any(kw in sentence_lower for kw in controversy_keywords):
+                    if person_name.lower().split()[0] in sentence_lower:
+                        alerts.append({
+                            "type": "controversy",
+                            "emoji": "⚠️",
+                            "label": "CONTROVERSY FLAGGED", 
+                            "text": sentence.strip()[:200],
+                            "source": domain,
+                            "url": source.url,
+                            "priority": 1
+                        })
+                
+                # Check launches
+                if any(kw in sentence_lower for kw in launch_keywords):
+                    alerts.append({
+                        "type": "launch",
+                        "emoji": "🚀",
+                        "label": "RECENT LAUNCH",
+                        "text": sentence.strip()[:200],
+                        "source": domain,
+                        "url": source.url,
+                        "priority": 3
+                    })
+        
+        # Remove duplicates (same text appearing in multiple sources)
+        seen_texts = set()
+        unique_alerts = []
+        for alert in alerts:
+            # Use first 50 chars as dedup key
+            key = alert["text"][:50].lower()
+            if key not in seen_texts:
+                seen_texts.add(key)
+                unique_alerts.append(alert)
+        
+        # Sort by priority (1=highest)
+        unique_alerts.sort(key=lambda x: x["priority"])
+        
+        # Limit to top 5 most important
+        return unique_alerts[:5]
+    
     def _call_groq_with_tools(self, messages: List[Dict], tools: List[Dict], system_message: str = None) -> Dict:
         """Call Groq API with tool calling support"""
         max_retries = 3
@@ -108,11 +205,26 @@ class IntelAgent:
         
         raise Exception(f"[GROQ ERROR] Max retries exceeded")
     
+    def _validate_search_query(self, query: str) -> str:
+        """Validate and enhance search query with required signal words/dates"""
+        # Check if query has date or signal word
+        signal_words = ['interview', 'news', 'said', 'announced', 'believes', 'latest', 'recent', '2025', '2026', 'april', 'march', 'february', 'january', 'december', 'november', 'october']
+        has_signal = any(word.lower() in query.lower() for word in signal_words)
+        
+        # If no signal word or year, add 2026
+        if not has_signal or ('2026' not in query and '2025' not in query):
+            query = query + " 2026"
+        
+        print(f"  [QUERY VALIDATED] {query}")
+        return query
+    
     def _execute_tool(self, tool_name: str, arguments: Dict) -> str:
         """Execute a tool and return result as string"""
         try:
             if tool_name == "tavily_search":
                 query = arguments.get("query", "")
+                # Validate query has signal words and dates
+                query = self._validate_search_query(query)
                 print(f"  [SEARCH] {query}")
                 self.search_count += 1
                 results = self.search_tool.search(query, count=2)
@@ -396,6 +508,9 @@ IMPORTANT: You MUST call save_briefing at the end. Do not just output text. Use 
                     timestamp=datetime.now().isoformat()
                 )
                 
+                # Detect critical alerts
+                briefing.alerts = self.detect_alerts(self.scraped_contents, person.name)
+                
                 return briefing
             
             # Execute tool calls
@@ -437,6 +552,10 @@ IMPORTANT: You MUST call save_briefing at the end. Do not just output text. Use 
                         sources=[f"Research: {self.search_count} searches, {self.scrape_success} scrapes"],
                         timestamp=datetime.now().isoformat()
                     )
+                    
+                    # Detect critical alerts
+                    briefing.alerts = self.detect_alerts(self.scraped_contents, person.name)
+                    
                     return briefing
             
             # Add tool results to messages - preserve ALL content for synthesis
@@ -456,7 +575,7 @@ IMPORTANT: You MUST call save_briefing at the end. Do not just output text. Use 
             
             # Build scraped_text from all collected scrapes for synthesis visibility
             scraped_text = "\n\n".join([
-                f"SOURCE: {s.url}\nCONTENT: {s.content[:2000]}"
+                f"SOURCE: {s.url}\nCONTENT: {s.content[:1200]}"
                 for s in self.scraped_contents
                 if s.content and len(s.content) > 100
             ])

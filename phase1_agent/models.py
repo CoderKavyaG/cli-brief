@@ -1,6 +1,6 @@
 from typing import List, Optional
 from datetime import datetime
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 import json
 
 @dataclass
@@ -49,6 +49,7 @@ class Briefing:
     social_handles: Optional[dict] = None  # (deprecated - use social_links)
     recent_activity: Optional[List] = None  # (deprecated)
     deep_insights: Optional[dict] = None    # (deprecated)
+    alerts: List[dict] = field(default_factory=list)  # Critical meeting intel alerts
     
     def to_markdown(self) -> str:
         """Convert briefing to markdown format"""
@@ -61,33 +62,50 @@ class Briefing:
 
 ---
 
-## Who They Are
+"""
+        
+        # Add critical alerts if present
+        if self.alerts:
+            md += "## 🔔 Critical Meeting Intel\n"
+            md += "> Read these before anything else\n\n"
+            for alert in self.alerts:
+                md += f"**{alert['emoji']} {alert['label']}**\n"
+                md += f"{alert['text']}\n"
+                md += f"[Source: {alert['source']}]({alert['url']})\n\n"
+            md += "---\n\n"
+        
+        md += """## Who They Are
 
-{self.who_they_are}
+{who_they_are}
 
 ---
 
 ## What They Care About Right Now
 
-{self.what_they_care_about}
+{what_they_care_about}
 
 ---
 
 ## Their Company's Current Situation
 
-{self.company_situation}
+{company_situation}
 
 ---
 
 ## How To Approach This Meeting
 
-{self.meeting_approach}
+{meeting_approach}
 
 ---
 
 ## Three Smart Questions
 
-"""
+""".format(
+            who_they_are=self.who_they_are,
+            what_they_care_about=self.what_they_care_about,
+            company_situation=self.company_situation,
+            meeting_approach=self.meeting_approach
+        )
         for i, q in enumerate(self.smart_questions, 1):
             md += f"{i}. {q}\n"
         

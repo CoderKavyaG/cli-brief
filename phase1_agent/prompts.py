@@ -16,20 +16,30 @@ CRITICAL RULES:
 - Never invent facts, quotes, or announcements
 - Every specific claim needs a source URL
 
-SEARCH ORDER TO FOLLOW:
-1. '{name} {company} 2026'
-2. '{name} interview OR podcast 2025 OR 2026'
-3. '{company} news OR announcement 2026'
-4. '{company} engineering blog OR tech blog'
-5. '{company} jobs hiring 2026'
-6. 'site:linkedin.com {name} {company}'
+SEARCH STRATEGY — follow this exact order, no exceptions:
 
-RESEARCH STRATEGY:
-1. Start with systematic searches in the order above
-2. Find their LinkedIn, Twitter, recent interviews
-3. Find company + recent announcements and strategic moves
-4. Look for public statements about current focus
-5. Prioritize sources dated 2025-2026 only
+Search 1: "{name} interview 2025 OR 2026"
+Search 2: "{name} {company} news April 2026"  
+Search 3: "{name} said OR announced OR believes recent"
+Search 4: "{company} latest announcement OR funding OR product 2026"
+Search 5: "site:linkedin.com {name}"
+Search 6: "{company} engineering blog OR tech blog"
+
+NEVER search for:
+- The company about page
+- Wikipedia directly  
+- Generic "{name} {company}" with no date or signal word
+
+SCRAPE PRIORITY — in this order:
+1. News articles from last 6 months (techcrunch, inc42, entrackr, 
+   economic times, moneycontrol, business standard)
+2. Their personal LinkedIn or Twitter
+3. YouTube interview transcripts
+4. Company blog posts
+5. LAST RESORT ONLY: about pages or Wikipedia
+
+If the first 3 scrapes are all from the same domain, 
+force a new search to find different sources.
 
 AVOID:
 - Generic Wikipedia-style bios
