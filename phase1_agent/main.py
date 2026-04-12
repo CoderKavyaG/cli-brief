@@ -67,6 +67,13 @@ class IntelAgent:
             
             for sentence in sentences:
                 sentence_lower = sentence.lower()
+                real_sentence = sentence.strip()
+                
+                # VALIDATE: Only create alerts if the sentence is real and meaningful
+                if len(real_sentence) < 25:
+                    continue  # Too short to be meaningful
+                if not any(c.isalpha() for c in real_sentence):
+                    continue  # No real words
                 
                 # IMPORTANT: Only create alerts if the person's name is ACTUALLY mentioned
                 # This prevents alerts about unrelated tech news
@@ -79,9 +86,9 @@ class IntelAgent:
                 if any(kw in sentence_lower for kw in role_keywords):
                     alerts.append({
                         "type": "role_change",
-                        "emoji": "🚨",
+                        "emoji": "[ALERT]",
                         "label": "ROLE CHANGE DETECTED",
-                        "text": sentence.strip()[:200],
+                        "text": real_sentence[:200],
                         "source": domain,
                         "url": source.url,
                         "priority": 1
@@ -91,7 +98,7 @@ class IntelAgent:
                 if any(kw in sentence_lower for kw in funding_keywords):
                     alerts.append({
                         "type": "funding",
-                        "emoji": "💰", 
+                        "emoji": "[FUNDING]", 
                         "label": "FUNDING EVENT",
                         "text": sentence.strip()[:200],
                         "source": domain,
@@ -103,9 +110,9 @@ class IntelAgent:
                 if any(kw in sentence_lower for kw in controversy_keywords):
                     alerts.append({
                         "type": "controversy",
-                        "emoji": "⚠️",
+                        "emoji": "[WARNING]",
                         "label": "CONTROVERSY FLAGGED", 
-                        "text": sentence.strip()[:200],
+                        "text": real_sentence[:200],
                         "source": domain,
                         "url": source.url,
                         "priority": 1
@@ -115,7 +122,7 @@ class IntelAgent:
                 if any(kw in sentence_lower for kw in launch_keywords):
                     alerts.append({
                         "type": "launch",
-                        "emoji": "🚀",
+                        "emoji": "[LAUNCH]",
                         "label": "RECENT LAUNCH",
                         "text": sentence.strip()[:200],
                         "source": domain,
@@ -688,6 +695,21 @@ QUALITY RULES:
 
 SCRAPED RESEARCH (use ONLY this, nothing else):
 {scraped_text}
+
+STRICT RULE: Never copy-paste any text from the scraped content. You are an analyst, not a transcriber.
+
+Read the scraped content, extract meaning, then write in clean professional sentences.
+
+NEVER include in your output:
+- CAPTCHA warnings
+- 'See new posts' or UI navigation text
+- Raw URLs embedded in sentences
+- Markdown link syntax like [text](url)
+- Warning messages from websites
+- Cookie notices or login prompts
+- Any text that looks like website UI
+
+If scraped content contains mostly navigation/UI text and less than 3 real facts about the person, write [NOT FOUND] for that section instead of using the UI text as content.
 
 RULES — CRITICAL:
 - Every single factual sentence ends with [Source: domain.com]

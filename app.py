@@ -191,10 +191,12 @@ HTML_TEMPLATE = """
         
         .briefing-content h2 {
             font-size: 18px;
-            margin: 20px 0 10px 0;
-            color: #333;
-            border-bottom: 2px solid #f0f0f0;
-            padding-bottom: 8px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-top: 28px;
+            margin-bottom: 10px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #f0f0f0;
         }
         
         .briefing-content h3 {
@@ -202,21 +204,38 @@ HTML_TEMPLATE = """
             margin: 15px 0 8px 0;
         }
         
-        .briefing-content p,
-        .briefing-content li {
+        .briefing-content p {
+            font-size: 15px;
+            line-height: 1.7;
+            color: #333;
             margin-bottom: 10px;
-            color: #555;
         }
         
-        .briefing-content ul,
-        .briefing-content ol {
-            margin-left: 20px;
-            margin-bottom: 10px;
+        .briefing-content ul {
+            padding-left: 20px;
+            margin-bottom: 12px;
+        }
+        
+        .briefing-content li {
+            font-size: 15px;
+            line-height: 1.7;
+            color: #333;
+            margin-bottom: 6px;
+        }
+        
+        .briefing-content a {
+            color: #2563eb;
+            text-decoration: none;
+            border-bottom: 1px solid #bfdbfe;
+        }
+        
+        .briefing-content a:hover {
+            border-bottom-color: #2563eb;
         }
         
         .briefing-content strong {
             font-weight: 600;
-            color: #333;
+            color: #1a1a1a;
         }
         
         .source-badge {
@@ -592,6 +611,50 @@ HTML_TEMPLATE = """
 """
 
 
+def clean_briefing(text: str) -> str:
+    """Remove UI artifacts, CAPTCHA warnings, and non-content from briefing text"""
+    # Remove CAPTCHA warnings
+    text = re.sub(r'Warning:.*?CAPTCHA.*?\n', '', text)
+    text = re.sub(r'Warning:.*?authorized.*?\n', '', text)
+    
+    # Remove "See new posts" type UI artifacts  
+    text = re.sub(r'See new posts\n?', '', text)
+    text = re.sub(r'See \d+ posts\n?', '', text)
+    text = re.sub(r'See replies?.*?\n?', '', text, flags=re.IGNORECASE)
+    
+    # Remove lines that are just URLs with no context
+    lines = text.split('\n')
+    clean_lines = []
+    for line in lines:
+        stripped = line.strip()
+        # Keep line if it has real content beyond just a URL
+        if stripped.startswith('http') and len(stripped) < 100:
+            continue  # Skip bare URL lines
+        if stripped == 'URL Source:' or stripped.startswith('Source:'):
+            continue  # Skip empty URL source labels
+        if stripped.lower().startswith('cookie') or 'cookie' in stripped.lower():
+            continue  # Skip cookie notices
+        if 'javascript' in stripped.lower() or 'required to view' in stripped.lower():
+            continue  # Skip JS/login prompts
+        clean_lines.append(line)
+    
+    return '\n'.join(clean_lines)
+
+
+def render_briefing(briefing_text: str) -> str:
+    """Convert markdown briefing to properly formatted HTML with working links"""
+    cleaned = clean_briefing(briefing_text)
+    html = markdown2.markdown(
+        cleaned,
+        extras=[
+            'fenced-code-blocks',
+            'tables', 
+            'break-on-newline'
+        ]
+    )
+    return html
+
+
 def extract_confidence_level(html_content: str) -> str:
     """Extract confidence level from briefing content"""
     if "Confidence: HIGH" in html_content:
@@ -697,8 +760,8 @@ def research():
         # Generate markdown briefing from research data
         markdown_content = generate_briefing_from_research(research_data, person)
         
-        # Convert markdown to HTML
-        html_content = markdown2.markdown(markdown_content, extras=['nl2br', 'tables'])
+        # Convert markdown to HTML with proper cleaning and rendering
+        html_content = render_briefing(markdown_content)
         
         # Add styling
         html_content = style_source_badges(html_content)
