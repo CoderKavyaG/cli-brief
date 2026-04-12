@@ -16,7 +16,9 @@ def extract_with_groq(html_content: str, platform: str, person_name: str = "") -
     """
     Extract structured data from HTML using Groq AI.
     More reliable than keyword matching on large HTML files.
+    Handles rate limiting with backoff and large payloads gracefully.
     """
+    import time
     from html.parser import HTMLParser
     
     # Strip HTML tags to get readable text
@@ -31,10 +33,12 @@ def extract_with_groq(html_content: str, platform: str, person_name: str = "") -
     
     parser = HTMLToText()
     try:
-        parser.feed(html_content[:50000])  # Use first 50KB to avoid token limits
+        # Limit content to first 30KB to avoid 413 payload errors
+        parser.feed(html_content[:30000])
         cleaned_text = parser.get_text()
     except:
-        cleaned_text = html_content[:50000]  # Fallback: raw HTML
+        # Fallback: raw HTML, truncated
+        cleaned_text = html_content[:30000]
     
     # Define extraction fields per platform
     extraction_fields = {
@@ -52,7 +56,7 @@ Platform: {platform}
 Person/Entity: {person_name}
 
 CONTENT:
-{cleaned_text[:40000]}
+{cleaned_text[:25000]}
 
 Extract the following fields ONLY if they are clearly present in the content.
 Return ONLY valid JSON with no extra text. If a field is not found, use null.
@@ -81,57 +85,89 @@ EXTRACTION RULES:
 - Be specific and concise
 - Do NOT include generic template text"""
 
-    try:
-        response = requests.post(
-            GROQ_API_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": GROQ_MODEL,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": extraction_prompt
-                    }
-                ],
-                "temperature": 0,  # Zero temp for consistency
-                "max_tokens": 1500
-            },
-            timeout=15
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            response_text = result['choices'][0]['message']['content']
+    max_retries = 3
+    retry_delay = 1
+    
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                GROQ_API_URL,
+                headers={
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": GROQ_MODEL,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": extraction_prompt
+                        }
+                    ],
+                    "temperature": 0,  # Zero temp for consistency
+                    "max_tokens": 1000  # Reduced token limit
+                },
+                timeout=10
+            )
             
-            # Extract JSON from response
-            try:
-                # Try to parse as JSON directly
-                extracted = json.loads(response_text)
-            except:
-                # If response has extra text, try to find JSON block
-                import re
-                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                if json_match:
-                    extracted = json.loads(json_match.group())
+            if response.status_code == 200:
+                result = response.json()
+                response_text = result['choices'][0]['message']['content']
+                
+                # Extract JSON from response
+                try:
+                    # Try to parse as JSON directly
+                    extracted = json.loads(response_text)
+                except:
+                    # If response has extra text, try to find JSON block
+                    import re
+                    json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                    if json_match:
+                        extracted = json.loads(json_match.group())
+                    else:
+                        extracted = {}  # Return empty dict if parsing fails
+                
+                # Convert None values to "[NOT FOUND]" for consistency
+                for key in extracted:
+                    if extracted[key] is None or extracted[key] == "":
+                        extracted[key] = "[NOT FOUND]"
+                
+                return extracted
+                
+            elif response.status_code == 429:
+                # Rate limit - retry with exponential backoff
+                if attempt < max_retries - 1:
+                    delay = retry_delay * (2 ** attempt)  # Exponential backoff
+                    print(f"[RATE LIMIT] Retrying in {delay}s (attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(delay)
+                    continue
                 else:
-                    extracted = {}  # Return empty dict if parsing fails
-            
-            # Convert None values to "[NOT FOUND]" for consistency
-            for key in extracted:
-                if extracted[key] is None or extracted[key] == "":
-                    extracted[key] = "[NOT FOUND]"
-            
-            return extracted
-        else:
-            print(f"[GROQ EXTRACTION ERROR] Status {response.status_code}")
+                    print(f"[RATE LIMIT EXCEEDED] Max retries exceeded")
+                    return {}
+                    
+            elif response.status_code == 413:
+                # Payload too large - reduce content more aggressively
+                print(f"[PAYLOAD TOO LARGE] Skipping extraction")
+                return {}
+                
+            else:
+                print(f"[GROQ EXTRACTION ERROR] Status {response.status_code}: {response.text[:100]}")
+                return {}
+                
+        except requests.Timeout:
+            if attempt < max_retries - 1:
+                print(f"[TIMEOUT] Retrying... (attempt {attempt + 1}/{max_retries})")
+                time.sleep(retry_delay)
+                continue
+            else:
+                print(f"[TIMEOUT EXCEEDED] Max retries exceeded")
+                return {}
+                
+        except Exception as e:
+            print(f"[EXTRACTION ERROR] {str(e)[:100]}")
             return {}
-            
-    except Exception as e:
-        print(f"[EXTRACTION ERROR] {str(e)}")
-        return {}
+    
+    return {}
 
 
 class LinkedInAgent:
