@@ -211,8 +211,8 @@ class IntelAgent:
         
         final_briefing_content = ""  # Store briefing from save_briefing tool call
         
-        # SYSTEM INSTRUCTIONS FOR GROQ
-        system_message = f"""You are an Executive Briefing Specialist AI. Your task is to research a person and create an executive briefing.
+        # SYSTEM INSTRUCTIONS FOR GROQ (Phase 1: Search & Scrape)
+        system_message_research = f"""You are an Executive Briefing Specialist AI. Your task is to research a person and create an executive briefing.
 
 REQUIREMENTS:
 1. Use tavily_search to find information about the person
@@ -221,36 +221,11 @@ REQUIREMENTS:
 4. CRITICAL: Use ONLY the information from the tool results (scraped web content) in your briefing
 5. Do NOT use training data - base EVERY fact on the scraped research provided
 6. IMPORTANT: You MUST call save_briefing when ready - do NOT just generate text
-
-BRIEFING STRUCTURE (use these EXACT headers):
-# Executive Briefing: [Person Name]
-
-## Who They Are
-[1-2 sentences from scraped research about their role and background]
-
-## What They Care About
-[1-2 sentences from scraped research about their interests and focus areas]
-
-## Current Company Situation
-[1-2 sentences from scraped research about their company and current status]
-
-## Meeting Approach
-[1-2 sentences from scraped research about how to approach them]
-
-## Smart Questions to Ask
-[1-2 sentences with suggested questions based on scraped research]
-
-## Things to Avoid
-[1-2 sentences from scraped research about what to avoid]
-
-## Icebreaker / Common Ground
-[1-2 sentences from scraped research for starting the conversation]
-
-CRITICAL: When you have gathered enough information, call save_briefing function with:
-- content: the complete briefing markdown (all 8 sections, based ONLY on scraped research)
-- name: the person's full name
-
-REMINDER: Use ONLY the scraped web content provided in tool results. Do NOT rely on training data."""
+7. CRITICAL: Every factual sentence must end with [Source: domain.com]
+8. If you cannot find a fact in the research provided, write [NOT FOUND]"""
+        
+        # Start with research phase
+        system_message = system_message_research
         
         # Define tools for Groq - OpenAI format
         tools = [
@@ -490,6 +465,71 @@ IMPORTANT: You MUST call save_briefing at the end. Do not just output text. Use 
             if len(scraped_text) < 500:
                 print("[WARNING] Very little research content - briefing may be low quality")
             print(f"[DEBUG TOTAL CONTENT] {total_scrape_chars} chars of research now in messages sent to Groq")
+            
+            # Generate synthesis_prompt with source citation enforcement
+            synthesis_prompt = f"""You are writing an executive briefing for a meeting with {person.name}.
+
+SCRAPED RESEARCH (use ONLY this, nothing else):
+{scraped_text}
+
+RULES — CRITICAL:
+- Every single factual sentence ends with [Source: domain.com]
+- Extract the domain from the SOURCE: URL in the research above
+- If you cannot find a fact in the research above, write [NOT FOUND]
+- Never write a sentence without a source tag
+- Numbers, dates, names of products must all have source tags
+
+WRITE THE BRIEFING IN THIS EXACT FORMAT:
+
+# Executive Briefing: {person.name}
+**Role:** {person.role} | **Company:** {person.company}
+**Meeting Context:** {person.context}
+**Generated:** {datetime.now().strftime('%B %d, %Y')}
+
+---
+
+## Research Confidence
+- Sources scraped: {len(self.scraped_contents)}
+- Total chars analyzed: {len(scraped_text)}
+- Confidence: {"HIGH" if len(self.scraped_contents) >= 3 else "MEDIUM" if len(self.scraped_contents) >= 1 else "LOW"}
+
+---
+
+## Who They Are
+[2 sentences. Each ends with [Source: domain.com]. 
+If not in research write [NOT FOUND]]
+
+## What They Care About Right Now
+[3-4 bullet points from recent news/posts/interviews.
+Each bullet ends with [Source: domain.com]]
+
+## Current Company Situation  
+[3-4 specific facts with dates if available.
+Each fact ends with [Source: domain.com]]
+
+## How To Approach This Meeting
+[3 specific tactical points based on what you found.
+Tied to meeting context: {person.context}]
+
+## Three Smart Questions
+1. [Question referencing specific thing found in research [Source: domain.com]]
+2. [Question referencing specific thing found in research [Source: domain.com]]
+3. [Question referencing specific thing found in research [Source: domain.com]]
+
+## Two Things To Avoid
+1. [Based on specific signal from research [Source: domain.com]]
+2. [Based on specific signal from research [Source: domain.com]]
+
+## Icebreaker
+[ONE specific thing from research. Quote it or reference it precisely.
+Must include exact URL: [Source: full-url-here]]
+
+## Sources
+[List every URL that had content, one per line]
+"""
+            
+            # Update system message to include synthesis instructions
+            system_message = synthesis_prompt
             
             print(f"[STATS] Searches: {self.search_count}, Scrapes: {self.scrape_count}, Successful: {self.scrape_success}\n")
         
