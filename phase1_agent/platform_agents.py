@@ -7,9 +7,131 @@ Each agent specializes in extracting deep insights from a specific platform
 import json
 import requests
 from typing import List, Dict, Optional
-from phase1_agent.config import TAVILY_API_KEY, TAVILY_SEARCH_URL
+from phase1_agent.config import TAVILY_API_KEY, TAVILY_SEARCH_URL, GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL
 from phase1_agent.models import ScrapedContent
 from datetime import datetime
+
+
+def extract_with_groq(html_content: str, platform: str, person_name: str = "") -> Dict:
+    """
+    Extract structured data from HTML using Groq AI.
+    More reliable than keyword matching on large HTML files.
+    """
+    from html.parser import HTMLParser
+    
+    # Strip HTML tags to get readable text
+    class HTMLToText(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.text = []
+        def handle_data(self, data):
+            self.text.append(data)
+        def get_text(self):
+            return ' '.join(self.text)
+    
+    parser = HTMLToText()
+    try:
+        parser.feed(html_content[:50000])  # Use first 50KB to avoid token limits
+        cleaned_text = parser.get_text()
+    except:
+        cleaned_text = html_content[:50000]  # Fallback: raw HTML
+    
+    # Define extraction fields per platform
+    extraction_fields = {
+        "linkedin": ["current_role", "bio", "skills", "education", "recommendations"],
+        "twitter": ["bio", "followers", "website", "recent_posts"],
+        "github": ["bio", "languages", "popular_repos", "contributions"],
+        "personal_site": ["bio", "role", "projects", "skills"],
+        "company": ["company_name", "description", "industry", "size"]
+    }
+    
+    fields = extraction_fields.get(platform, ["bio", "role", "skills"])
+    
+    extraction_prompt = f"""Extract structured information from the following web page content.
+Platform: {platform}
+Person/Entity: {person_name}
+
+CONTENT:
+{cleaned_text[:40000]}
+
+Extract the following fields ONLY if they are clearly present in the content.
+Return ONLY valid JSON with no extra text. If a field is not found, use null.
+
+{{
+  "current_role": "Their current position/job title (if clearly stated)",
+  "bio": "Brief professional biography or about section",
+  "skills": "Technical or professional skills mentioned",
+  "education": "Educational background",
+  "projects": "Notable projects or work",
+  "website": "Any website, portfolio, or social media links found",
+  "company_name": "Company or organization name",
+  "description": "Description of the company or person",
+  "followers": "Number of followers or connections if mentioned",
+  "recent_posts": "Summary of recent activity or posts",
+  "languages": "Programming languages used (for GitHub)",
+  "industry": "Industry or field",
+  "recommendations": "Recommendations or endorsements",
+  "endorsements": "Skill endorsements"
+}}
+
+EXTRACTION RULES:
+- Extract ONLY factual information actually visible in the content
+- Do NOT make up or assume information
+- If a field is not clearly visible, return null
+- Be specific and concise
+- Do NOT include generic template text"""
+
+    try:
+        response = requests.post(
+            GROQ_API_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": GROQ_MODEL,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": extraction_prompt
+                    }
+                ],
+                "temperature": 0,  # Zero temp for consistency
+                "max_tokens": 1500
+            },
+            timeout=15
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            response_text = result['choices'][0]['message']['content']
+            
+            # Extract JSON from response
+            try:
+                # Try to parse as JSON directly
+                extracted = json.loads(response_text)
+            except:
+                # If response has extra text, try to find JSON block
+                import re
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                if json_match:
+                    extracted = json.loads(json_match.group())
+                else:
+                    extracted = {}  # Return empty dict if parsing fails
+            
+            # Convert None values to "[NOT FOUND]" for consistency
+            for key in extracted:
+                if extracted[key] is None or extracted[key] == "":
+                    extracted[key] = "[NOT FOUND]"
+            
+            return extracted
+        else:
+            print(f"[GROQ EXTRACTION ERROR] Status {response.status_code}")
+            return {}
+            
+    except Exception as e:
+        print(f"[EXTRACTION ERROR] {str(e)}")
+        return {}
 
 
 class LinkedInAgent:
@@ -56,15 +178,8 @@ class LinkedInAgent:
     
     @staticmethod
     def extract_profile_data(scraped_content: str, person_name: str) -> Dict:
-        """Extract structured data from LinkedIn profile"""
-        return {
-            "current_role": extract_section(scraped_content, "experience", person_name),
-            "bio": extract_section(scraped_content, "about", person_name),
-            "skills": extract_section(scraped_content, "skills", person_name),
-            "education": extract_section(scraped_content, "education", person_name),
-            "recommendations": extract_section(scraped_content, "recommendation", person_name),
-            "endorsements": extract_section(scraped_content, "endorse", person_name),
-        }
+        """Extract structured data from LinkedIn profile using Groq"""
+        return extract_with_groq(scraped_content, "linkedin", person_name)
 
 
 class PersonalSiteAgent:
@@ -115,14 +230,8 @@ class PersonalSiteAgent:
     
     @staticmethod
     def extract_personal_data(scraped_content: str) -> Dict:
-        """Extract data from personal site"""
-        return {
-            "intro": extract_section(scraped_content, "about|hello|welcome|bio", person_name=""),
-            "projects": extract_section(scraped_content, "project|portfolio|work", person_name=""),
-            "skills_tech": extract_section(scraped_content, "tech|stack|skills", person_name=""),
-            "social_links": extract_social_links(scraped_content),
-            "contact_info": extract_section(scraped_content, "contact|email|connect", person_name=""),
-        }
+        """Extract data from personal site using Groq"""
+        return extract_with_groq(scraped_content, "personal_site", "")
 
 
 class TwitterAgent:
@@ -169,13 +278,8 @@ class TwitterAgent:
     
     @staticmethod
     def extract_twitter_data(scraped_content: str) -> Dict:
-        """Extract insights from Twitter profile and recent tweets"""
-        return {
-            "bio": extract_section(scraped_content, "bio|about", person_name=""),
-            "interests": extract_section(scraped_content, "focus|interested|working on", person_name=""),
-            "recent_thoughts": extract_section(scraped_content, "tweet|post|think|believe", person_name=""),
-            "engagement_style": extract_section(scraped_content, "quote|reply|retweet", person_name=""),
-        }
+        """Extract insights from Twitter profile and recent tweets using Groq"""
+        return extract_with_groq(scraped_content, "twitter", "")
 
 
 class CompanyAgent:
@@ -223,14 +327,8 @@ class CompanyAgent:
     
     @staticmethod
     def extract_company_data(scraped_content: str) -> Dict:
-        """Extract company insights"""
-        return {
-            "mission": extract_section(scraped_content, "mission|purpose|goal", person_name=""),
-            "team": extract_section(scraped_content, "team|founder|leader|member", person_name=""),
-            "products": extract_section(scraped_content, "product|service|offer|build", person_name=""),
-            "funding": extract_section(scraped_content, "funding|raise|invest|series", person_name=""),
-            "recent_news": extract_section(scraped_content, "announce|launch|release|news", person_name=""),
-        }
+        """Extract company insights using Groq"""
+        return extract_with_groq(scraped_content, "company", "")
 
 
 class GitHubAgent:
@@ -276,13 +374,8 @@ class GitHubAgent:
     
     @staticmethod
     def extract_github_data(scraped_content: str) -> Dict:
-        """Extract GitHub profile insights"""
-        return {
-            "bio": extract_section(scraped_content, "bio|about", person_name=""),
-            "languages": extract_section(scraped_content, "javascript|python|go|rust|java", person_name=""),
-            "popular_repos": extract_section(scraped_content, "repository|repo|project", person_name=""),
-            "contributions": extract_section(scraped_content, "contribution|commit|open source", person_name=""),
-        }
+        """Extract GitHub profile insights using Groq"""
+        return extract_with_groq(scraped_content, "github", "")
 
 
 def extract_section(content: str, keywords: str, person_name: str = "") -> str:

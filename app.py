@@ -818,12 +818,15 @@ def generate_briefing_from_research(research_data: dict, person: Person) -> str:
     # Call Groq to synthesize the research into a professional briefing
     synthesis_prompt = f"""You are an expert meeting preparation analyst. 
 Your job is to synthesize research data into a concise, professional executive briefing.
+CRITICAL: Only use facts that are clearly stated in the research findings below.
+Do NOT invent or assume facts. If data is unclear or mixed, note that uncertainty.
 
 PERSON: {person.name}
 ROLE: {person.role}
 COMPANY: {person.company}
 MEETING CONTEXT: {person.context}
 
+RESEARCH DATA (Use ONLY what's here):
 {research_text}
 
 WRITE A PROFESSIONAL BRIEFING IN THIS EXACT FORMAT:
@@ -836,47 +839,40 @@ WRITE A PROFESSIONAL BRIEFING IN THIS EXACT FORMAT:
 ---
 
 ## Who They Are
-[2-3 sentences about their background, career, and current position. Use specific facts from research. Must include real details.]
+[2-3 sentences. Pull SPECIFIC facts from research only. Reference their actual role, background from sources below. Must cite where you found this.]
 
 ## What They Care About
-[3-4 bullet points about their interests, recent activities, and focus areas. Each should be a specific fact from research.]
-* [specific fact about their interests or projects]
-* [specific fact about their recent work]
-* [specific fact about what they're focused on]
+[3-4 bullet points from ACTUAL research findings only]
+* [Specific finding from research - cite source URL]
+* [Specific finding from research - cite source URL]
+* [Specific finding from research - cite source URL]
 
 ## Current Company Situation
-[3-4 bullet points about their organization's mission, products, and recent developments]
-* [specific fact about company mission or products]
-* [specific fact about recent developments]
-* [specific fact about organization focus]
+[Facts about their company from research]
+* [Specific company fact from research - cite source URL]
+* [Specific company fact from research - cite source URL]
 
 ## How To Approach This Meeting
-[3 specific, personalized tactical tips based on what you found about them]
-* [Specific tip 1 - reference actual finding]
-* [Specific tip 2 - reference actual finding]
-* [Specific tip 3 - reference actual finding]
+[3 specific tactical tips based ON ACTUAL facts found in research]
+* [Tip tied to specific finding with source]
+* [Tip tied to specific finding with source]
+* [Tip tied to specific finding with source]
 
 ## Three Smart Questions
-1. [Question tied to specific thing found in research]
-2. [Question tied to specific thing found in research]
-3. [Question tied to specific thing found in research]
+1. [Question based on SPECIFIC fact from research]
+2. [Question based on SPECIFIC fact from research]
+3. [Question based on SPECIFIC fact from research]
 
-## Two Things To Avoid
-* [Specific pitfall based on research finding]
-* [Specific pitfall based on research finding]
-
-## Conversation Starter
-[ONE specific, personal detail from research you can reference to show genuine interest]
-
----
+## Key Findings & Sources
+* [list each key fact and the URL it came from]
 
 CRITICAL RULES:
-- Every section must contain SPECIFIC facts from research, not generic template text
-- No generic phrases like "strong background" or "demonstrated interests"
-- Reference exact projects, companies, technologies, or recent activities found
-- If you cannot find specific information for a section, write [TOO LITTLE DATA - RESEARCH MORE]
-- Keep it SHORT and ACTIONABLE
-- Use their actual work/interests, not generic advice
+- EVERY statement must be traced back to the research data above
+- If research is unclear or potentially mixed data, say "Unclear from research" or "Need to verify"
+- Include the source URL after EACH major fact
+- Do NOT use generic phrases like "strong background" unless specifically stated in research
+- Do NOT connect unrelated data from different URLs
+- Be SHORT and ACTIONABLE
 """
     
     try:
@@ -917,7 +913,16 @@ CRITICAL RULES:
 
 
 def _fallback_briefing(research_data: dict, person: Person) -> str:
-    """Fallback brief briefing if synthesis fails"""
+    """Fallback brief briefing if synthesis fails - shows what was actually researched"""
+    
+    # Collect all URLs that were researched
+    all_urls = []
+    for platform, data in research_data['platforms'].items():
+        for item in data.get('scraped_content', []):
+            all_urls.append((platform, item['url']))
+    
+    urls_section = "\n".join([f"- [{platform}] {url}" for platform, url in all_urls])
+    
     briefing = f"""# Executive Briefing: {person.name}
 
 **Role:** {person.role} | **Company:** {person.company}
@@ -926,26 +931,25 @@ def _fallback_briefing(research_data: dict, person: Person) -> str:
 
 ---
 
-## Who They Are
-[Research data available but synthesis unavailable. Check full research report above.]
+## Research Performed (5 Platforms)
 
-## What They Care About
-[Research data available - see platforms researched below]
+### URLs Researched:
+{urls_section}
 
-## Current Company Situation
-[Research gathered across 5 platforms: LinkedIn, Twitter, GitHub, Personal Sites, Company Info]
-
-## Research Platforms
-- LinkedIn: {len(research_data['platforms'].get('linkedin', {}).get('scraped_content', []))} profiles researched
-- Twitter: {len(research_data['platforms'].get('twitter', {}).get('scraped_content', []))} profiles researched
-- GitHub: {len(research_data['platforms'].get('github', {}).get('scraped_content', []))} profiles researched
-- Personal Sites: {len(research_data['platforms'].get('personal_site', {}).get('scraped_content', []))} sites researched
-- Company: {len(research_data['platforms'].get('company', {}).get('scraped_content', []))} sources researched
+### Platforms & Coverage:
+- LinkedIn: {len(research_data['platforms'].get('linkedin', {}).get('scraped_content', []))} profiles
+- Twitter/X: {len(research_data['platforms'].get('twitter', {}).get('scraped_content', []))} profiles
+- GitHub: {len(research_data['platforms'].get('github', {}).get('scraped_content', []))} profiles
+- Personal Sites: {len(research_data['platforms'].get('personal_site', {}).get('scraped_content', []))} sites
+- Company Info: {len(research_data['platforms'].get('company', {}).get('scraped_content', []))} sources
 
 ---
 
-Note: Synthesis temporarily unavailable. Raw research data is available in the research output above.
-Use the audit report to understand what was found across each platform.
+## Note:
+If the URLs above look incorrect (wrong person, wrong company), the issue is with search results, not the briefing.
+Try providing a more specific company name or LinkedIn URL to get more accurate research.
+
+See Research Audit Report for detailed extraction from each URL.
 """
     return briefing
 
