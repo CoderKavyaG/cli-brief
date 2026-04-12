@@ -910,11 +910,10 @@ Must include exact URL: [Source: full-url-here]]
 
 
 def main():
-    """Entry point - use deep research by default"""
+    """Entry point - use Groq-based research with identity locking"""
     if len(sys.argv) < 3:
         print("Usage: python -m phase1_agent.main <name> <role> [company] [context]")
-        print("Example: python -m phase1_agent.main 'Albinder Dhindsa' 'CEO' 'Blinkit' 'I want to pitch supply chain tool'")
-        print("\nNote: This uses DEEP RESEARCH across 5 platforms (LinkedIn, Twitter, GitHub, Personal Site, Company)")
+        print("Example: python -m phase1_agent.main 'Ishan Kumar' 'CEO' 'InTheBox' 'meeting for intern hiring'")
         sys.exit(1)
     
     name = sys.argv[1]
@@ -924,18 +923,18 @@ def main():
     
     person = Person(name=name, role=role, company=company, context=context)
     
-    # Use deep research coordinator
-    from phase1_agent.coordinator import PlatformCoordinator
-    coordinator = PlatformCoordinator()
-    research_data = coordinator.research_person_deep(person)
+    # Use Groq-based research with identity locking via IntelAgent
+    agent = IntelAgent()
+    briefing = agent.research(person)
     
-    # Show audit report
-    audit_report = coordinator.generate_audit_report(research_data)
-    print(audit_report)
-    
-    print("\n" + "="*60)
-    print("✅ DEEP RESEARCH COMPLETE")
-    print("="*60)
+    if briefing:
+        print("\n" + "="*60)
+        print("[SUCCESS] RESEARCH COMPLETE")
+        print("="*60)
+        print(briefing.to_markdown()[:1000])
+    else:
+        print("\n[ERROR] Research failed")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
