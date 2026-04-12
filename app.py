@@ -793,9 +793,131 @@ def research():
 
 
 def generate_briefing_from_research(research_data: dict, person: Person) -> str:
-    """Generate executive briefing markdown from deep research data"""
+    """Generate executive briefing by synthesizing research data with Groq"""
+    from phase1_agent.config import GROQ_API_KEY, GROQ_MODEL, GROQ_API_URL
+    import requests
+    import json
     
-    # Build briefing from extracted data
+    # Collect all scraped content organized by platform
+    research_text = "RESEARCH FINDINGS:\n\n"
+    
+    for platform, data in research_data['platforms'].items():
+        research_text += f"\n{platform.upper().replace('_', ' ')}:\n"
+        research_text += "-" * 40 + "\n"
+        
+        for item in data.get('scraped_content', []):
+            extracted = item['extracted']
+            research_text += f"\nFrom: {item['url'][:80]}\n"
+            
+            # Add all non-empty extracted fields
+            for key, value in extracted.items():
+                if value and '[NOT FOUND]' not in str(value):
+                    clean_val = str(value)[:300]  # Limit length
+                    research_text += f"  {key}: {clean_val}\n"
+    
+    # Call Groq to synthesize the research into a professional briefing
+    synthesis_prompt = f"""You are an expert meeting preparation analyst. 
+Your job is to synthesize research data into a concise, professional executive briefing.
+
+PERSON: {person.name}
+ROLE: {person.role}
+COMPANY: {person.company}
+MEETING CONTEXT: {person.context}
+
+{research_text}
+
+WRITE A PROFESSIONAL BRIEFING IN THIS EXACT FORMAT:
+
+# Executive Briefing: {person.name}
+
+**Role:** {person.role} | **Company:** {person.company}
+**Meeting Context:** {person.context}
+
+---
+
+## Who They Are
+[2-3 sentences about their background, career, and current position. Use specific facts from research. Must include real details.]
+
+## What They Care About
+[3-4 bullet points about their interests, recent activities, and focus areas. Each should be a specific fact from research.]
+* [specific fact about their interests or projects]
+* [specific fact about their recent work]
+* [specific fact about what they're focused on]
+
+## Current Company Situation
+[3-4 bullet points about their organization's mission, products, and recent developments]
+* [specific fact about company mission or products]
+* [specific fact about recent developments]
+* [specific fact about organization focus]
+
+## How To Approach This Meeting
+[3 specific, personalized tactical tips based on what you found about them]
+* [Specific tip 1 - reference actual finding]
+* [Specific tip 2 - reference actual finding]
+* [Specific tip 3 - reference actual finding]
+
+## Three Smart Questions
+1. [Question tied to specific thing found in research]
+2. [Question tied to specific thing found in research]
+3. [Question tied to specific thing found in research]
+
+## Two Things To Avoid
+* [Specific pitfall based on research finding]
+* [Specific pitfall based on research finding]
+
+## Conversation Starter
+[ONE specific, personal detail from research you can reference to show genuine interest]
+
+---
+
+CRITICAL RULES:
+- Every section must contain SPECIFIC facts from research, not generic template text
+- No generic phrases like "strong background" or "demonstrated interests"
+- Reference exact projects, companies, technologies, or recent activities found
+- If you cannot find specific information for a section, write [TOO LITTLE DATA - RESEARCH MORE]
+- Keep it SHORT and ACTIONABLE
+- Use their actual work/interests, not generic advice
+"""
+    
+    try:
+        response = requests.post(
+            GROQ_API_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": GROQ_MODEL,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": synthesis_prompt
+                    }
+                ],
+                "temperature": 0.3,  # Low temp for consistency
+                "max_tokens": 2000
+            },
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            briefing = result['choices'][0]['message']['content']
+            print(f"[GROQ] Synthesis successful: {len(briefing)} chars")
+            return briefing
+        else:
+            print(f"[GROQ ERROR] Status {response.status_code}: {response.text}")
+            # Fallback to basic template if Groq fails
+            return _fallback_briefing(research_data, person)
+            
+    except Exception as e:
+        print(f"[GROQ SYNTHESIS ERROR] {str(e)}")
+        # Fallback to basic template
+        return _fallback_briefing(research_data, person)
+
+
+def _fallback_briefing(research_data: dict, person: Person) -> str:
+    """Fallback brief briefing if synthesis fails"""
     briefing = f"""# Executive Briefing: {person.name}
 
 **Role:** {person.role} | **Company:** {person.company}
@@ -804,84 +926,29 @@ def generate_briefing_from_research(research_data: dict, person: Person) -> str:
 
 ---
 
-## Research Summary
-**Platforms Researched:** {len(research_data['platforms'])} platforms
-**Data Points Collected:** {sum(len(p.get('scraped_content', [])) for p in research_data['platforms'].values())} sources
-**Confidence:** {'HIGH' if sum(len(p.get('scraped_content', [])) for p in research_data['platforms'].values()) >= 3 else 'MEDIUM' if sum(len(p.get('scraped_content', [])) for p in research_data['platforms'].values()) >= 1 else 'LOW'}
+## Who They Are
+[Research data available but synthesis unavailable. Check full research report above.]
+
+## What They Care About
+[Research data available - see platforms researched below]
+
+## Current Company Situation
+[Research gathered across 5 platforms: LinkedIn, Twitter, GitHub, Personal Sites, Company Info]
+
+## Research Platforms
+- LinkedIn: {len(research_data['platforms'].get('linkedin', {}).get('scraped_content', []))} profiles researched
+- Twitter: {len(research_data['platforms'].get('twitter', {}).get('scraped_content', []))} profiles researched
+- GitHub: {len(research_data['platforms'].get('github', {}).get('scraped_content', []))} profiles researched
+- Personal Sites: {len(research_data['platforms'].get('personal_site', {}).get('scraped_content', []))} sites researched
+- Company: {len(research_data['platforms'].get('company', {}).get('scraped_content', []))} sources researched
 
 ---
 
-## Who They Are
-
+Note: Synthesis temporarily unavailable. Raw research data is available in the research output above.
+Use the audit report to understand what was found across each platform.
 """
-    
-    # Extract LinkedIn data
-    linkedin_data = research_data['platforms'].get('linkedin', {})
-    if linkedin_data.get('scraped_content'):
-        for item in linkedin_data['scraped_content'][:1]:
-            extracted = item['extracted']
-            if extracted.get('bio') and '[NOT FOUND]' not in extracted['bio']:
-                briefing += f"{extracted['bio']} [Source: {item['url'][:50]}.../]\n\n"
-            if extracted.get('current_role') and '[NOT FOUND]' not in extracted['current_role']:
-                briefing += f"Role: {extracted['current_role']} [Source: {item['url'][:50]}.../]\n\n"
-    
-    # Extract personal site data
-    personal_data = research_data['platforms'].get('personal_site', {})
-    if personal_data.get('scraped_content'):
-        for item in personal_data['scraped_content'][:1]:
-            extracted = item['extracted']
-            if extracted.get('intro') and '[NOT FOUND]' not in extracted['intro']:
-                briefing += f"{extracted['intro'][:200]} [Source: {item['url'][:50]}.../]\n\n"
-    
-    briefing += "\n## What They Care About\n\n"
-    
-    # Extract Twitter/interests
-    twitter_data = research_data['platforms'].get('twitter', {})
-    if twitter_data.get('scraped_content'):
-        for item in twitter_data['scraped_content'][:1]:
-            extracted = item['extracted']
-            if extracted.get('interests') and '[NOT FOUND]' not in extracted['interests']:
-                briefing += f"* {extracted['interests'][:200]} [Source: twitter.com]\n"
-            if extracted.get('recent_thoughts') and '[NOT FOUND]' not in extracted['recent_thoughts']:
-                briefing += f"* {extracted['recent_thoughts'][:200]} [Source: twitter.com]\n"
-    
-    briefing += "\n## Current Company Situation\n\n"
-    
-    # Extract company data
-    company_data = research_data['platforms'].get('company', {})
-    if company_data.get('scraped_content'):
-        for item in company_data['scraped_content'][:1]:
-            extracted = item['extracted']
-            if extracted.get('mission') and '[NOT FOUND]' not in extracted['mission']:
-                briefing += f"* {extracted['mission'][:200]} [Source: {item['url'][:40]}.../]\n"
-            if extracted.get('team') and '[NOT FOUND]' not in extracted['team']:
-                briefing += f"* {extracted['team'][:200]} [Source: {item['url'][:40]}.../]\n"
-    
-    briefing += "\n## How To Approach This Meeting\n\n"
-    briefing += "* Research indicates strong background in the field\n"
-    briefing += "* Align discussion with their demonstrated interests\n"
-    briefing += "* Reference specific projects or insights found during research\n"
-    
-    briefing += "\n## Smart Questions\n\n"
-    briefing += "1. What aspects of your work do you find most impactful?\n"
-    briefing += "2. Where do you see the industry heading in the next 5 years?\n"
-    briefing += "3. How is your organization adapting to current market changes?\n"
-    
-    briefing += "\n## Areas To Explore\n\n"
-    briefing += "* Recent initiatives and projects\n"
-    briefing += "* Technical interests and expertise areas\n"
-    briefing += "* Vision for the organization\n"
-    
-    briefing += "\n## Conversation Starters\n\n"
-    briefing += f"Start with: 'I noticed you're working on [...], I'm very interested in that space.'\n"
-    briefing += "This shows you've done your research and have genuine interest.\n"
-    
-    briefing += "\n## Sources\n\n"
-    briefing += "**Research Depth:** Multi-platform verification\n"
-    briefing += f"**Platforms Checked:** LinkedIn, Personal Website, Twitter/X, GitHub, Company Pages\n"
-    briefing += f"**Last Updated:** {datetime.now().isoformat()}\n"
-    
     return briefing
+
 
 
 def extract_alerts_from_research(research_data: dict, person_name: str) -> list:
