@@ -698,6 +698,28 @@ def research():
                     "source": alert.get("source", ""),
                     "url": alert.get("url", "")
                 })
+            print(f"[DEBUG] Found {len(alerts_data)} alerts in briefing object")
+        
+        # Ensure alerts are in markdown if they exist
+        if alerts_data and '🔔' not in markdown_content:
+            print(f"[DEBUG] Alerts exist but not in markdown - prepending {len(alerts_data)} alerts")
+            alerts_md = "## 🔔 Critical Meeting Intel\n> Read these before anything else\n\n"
+            for alert in alerts_data:
+                alerts_md += f"**{alert['emoji']} {alert['label']}**\n"
+                alerts_md += f"{alert['text']}\n"
+                alerts_md += f"[Source: {alert['source']}]({alert['url']})\n\n"
+            alerts_md += "---\n\n"
+            markdown_content = alerts_md + markdown_content
+            print(f"[DEBUG] Markdown now starts with: {markdown_content[:100]}")
+            
+            # Re-convert to HTML with alerts
+            html_content = markdown2.markdown(markdown_content, extras=['nl2br', 'tables'])
+            html_content = style_source_badges(html_content)
+            html_content = add_confidence_badge(html_content)
+        elif alerts_data:
+            print(f"[DEBUG] Alerts exist AND are already in markdown")
+        else:
+            print(f"[DEBUG] No alerts to add")
         
         return jsonify({
             "success": True,
