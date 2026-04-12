@@ -742,10 +742,16 @@ if __name__ == '__main__':
     # Create output directory if it doesn't exist
     Path('output').mkdir(exist_ok=True)
     
+    # Read port from environment (Railway/Render set this)
+    # Default to 5000 for local development
+    port = int(os.environ.get('PORT', 5000))
+    host = '0.0.0.0'  # Listen on all interfaces for production
+    debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    
     print("="*60)
     print("Starting Meeting Intelligence Agent Web UI")
     print("="*60)
-    print("\n🚀 Open your browser to: http://localhost:5000\n")
+    print(f"\n🚀 Listening on http://{host}:{port}\n")
     print("Press Ctrl+C to stop the server\n")
     
-    app.run(debug=False, port=5000, host='127.0.0.1')
+    app.run(debug=debug, port=port, host=host)
