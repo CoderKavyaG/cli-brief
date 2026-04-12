@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Platform Research Coordinator
 Orchestrates multiple specialized agents to research a person deeply
@@ -30,7 +30,7 @@ class PlatformCoordinator:
         """
         
         print("\n" + "="*70)
-        print(f"🔍 MULTI-PLATFORM DEEP RESEARCH: {person.name}")
+        print(f"[DEEP RESEARCH] {person.name} - Multi-Platform Research")
         print("="*70 + "\n")
         
         results = {
@@ -45,31 +45,31 @@ class PlatformCoordinator:
         print("[1/5] RESEARCHING LINKEDIN...")
         linkedin_results = self._research_linkedin(person)
         results["platforms"]["linkedin"] = linkedin_results
-        print(f"✓ LinkedIn: {len(linkedin_results.get('urls', []))} profiles found\n")
+        print(f"[OK] LinkedIn: {len(linkedin_results.get('urls', []))} profiles found\n")
         
         # Platform 2: Personal Site
         print("[2/5] RESEARCHING PERSONAL SITE...")
         personal_results = self._research_personal_site(person)
         results["platforms"]["personal_site"] = personal_results
-        print(f"✓ Personal Site: {len(personal_results.get('urls', []))} sites found\n")
+        print(f"[OK] Personal Site: {len(personal_results.get('urls', []))} sites found\n")
         
         # Platform 3: Twitter/X
         print("[3/5] RESEARCHING TWITTER/X...")
         twitter_results = self._research_twitter(person)
         results["platforms"]["twitter"] = twitter_results
-        print(f"✓ Twitter: {len(twitter_results.get('urls', []))} profiles found\n")
+        print(f"[OK] Twitter: {len(twitter_results.get('urls', []))} profiles found\n")
         
         # Platform 4: GitHub
         print("[4/5] RESEARCHING GITHUB...")
         github_results = self._research_github(person)
         results["platforms"]["github"] = github_results
-        print(f"✓ GitHub: {len(github_results.get('urls', []))} profiles found\n")
+        print(f"[OK] GitHub: {len(github_results.get('urls', []))} profiles found\n")
         
         # Platform 5: Company
         print("[5/5] RESEARCHING COMPANY...")
         company_results = self._research_company(person)
         results["platforms"]["company"] = company_results
-        print(f"✓ Company: {len(company_results.get('urls', []))} pages found\n")
+        print(f"[OK] Company: {len(company_results.get('urls', []))} pages found\n")
         
         return results
     
@@ -84,7 +84,7 @@ class PlatformCoordinator:
         }
         
         for url_data in urls[:2]:  # Limit to top 2
-            print(f"  → Scraping: {url_data['url'][:50]}...")
+            print(f"  -> Scraping: {url_data['url'][:50]}...")
             content = self.scraper.scrape(url_data['url'])
             
             if content and len(content.content) > 100:
@@ -94,7 +94,7 @@ class PlatformCoordinator:
                     "extracted": extracted,
                     "raw_length": len(content.content)
                 })
-                print(f"     ✓ Extracted: {list(extracted.keys())}")
+                print(f"     [OK] Extracted: {list(extracted.keys())}")
         
         return research
     
@@ -109,7 +109,7 @@ class PlatformCoordinator:
         }
         
         for url_data in urls[:2]:  # Limit to top 2
-            print(f"  → Scraping: {url_data['url'][:50]}...")
+            print(f"  -> Scraping: {url_data['url'][:50]}...")
             content = self.scraper.scrape(url_data['url'])
             
             if content and len(content.content) > 100:
@@ -119,11 +119,11 @@ class PlatformCoordinator:
                     "extracted": extracted,
                     "raw_length": len(content.content)
                 })
-                print(f"     ✓ Extracted: {list(extracted.keys())}")
+                print(f"     [OK] Extracted: {list(extracted.keys())}")
                 
                 # Check for social links
                 if extracted.get("social_links"):
-                    print(f"     ✓ Found social links: {list(extracted['social_links'].keys())}")
+                    print(f"     [OK] Found social links: {list(extracted['social_links'].keys())}")
         
         return research
     
@@ -139,7 +139,7 @@ class PlatformCoordinator:
         
         for url_data in urls[:2]:  # Limit to top 2
             if "twitter" in url_data['url'].lower() or "x.com" in url_data['url'].lower():
-                print(f"  → Scraping: {url_data['url'][:50]}...")
+                print(f"  -> Scraping: {url_data['url'][:50]}...")
                 content = self.scraper.scrape(url_data['url'])
                 
                 if content and len(content.content) > 100:
@@ -149,7 +149,7 @@ class PlatformCoordinator:
                         "extracted": extracted,
                         "raw_length": len(content.content)
                     })
-                    print(f"     ✓ Extracted: {list(extracted.keys())}")
+                    print(f"     [OK] Extracted: {list(extracted.keys())}")
         
         return research
     
@@ -164,7 +164,7 @@ class PlatformCoordinator:
         }
         
         for url_data in urls[:2]:  # Limit to top 2
-            print(f"  → Scraping: {url_data['url'][:50]}...")
+            print(f"  -> Scraping: {url_data['url'][:50]}...")
             content = self.scraper.scrape(url_data['url'])
             
             if content and len(content.content) > 100:
@@ -174,7 +174,7 @@ class PlatformCoordinator:
                     "extracted": extracted,
                     "raw_length": len(content.content)
                 })
-                print(f"     ✓ Extracted: {list(extracted.keys())}")
+                print(f"     [OK] Extracted: {list(extracted.keys())}")
         
         return research
     
@@ -189,7 +189,7 @@ class PlatformCoordinator:
         }
         
         for url_data in urls[:2]:  # Limit to top 2
-            print(f"  → Scraping: {url_data['url'][:50]}...")
+            print(f"  -> Scraping: {url_data['url'][:50]}...")
             content = self.scraper.scrape(url_data['url'])
             
             if content and len(content.content) > 100:
@@ -199,7 +199,7 @@ class PlatformCoordinator:
                     "extracted": extracted,
                     "raw_length": len(content.content)
                 })
-                print(f"     ✓ Extracted: {list(extracted.keys())}")
+                print(f"     [OK] Extracted: {list(extracted.keys())}")
         
         return research
     
@@ -209,17 +209,17 @@ class PlatformCoordinator:
         Shows what data was found on each platform
         """
         report = f"""
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                   MULTI-PLATFORM RESEARCH AUDIT REPORT                       ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+================================================================================
+                   MULTI-PLATFORM RESEARCH AUDIT REPORT
+================================================================================
 
-👤 PERSON: {research['person']}
-📍 ROLE: {research['role']} | 🏢 COMPANY: {research['company']}
-📅 GENERATED: {research['timestamp']}
+PERSON: {research['person']}
+ROLE: {research['role']} | COMPANY: {research['company']}
+GENERATED: {research['timestamp']}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+================================================================================
 
-🔍 PLATFORM RESEARCH SUMMARY:
+PLATFORM RESEARCH SUMMARY:
 
 """
         
@@ -228,28 +228,28 @@ class PlatformCoordinator:
             urls_found = len(platform_data.get('urls', []))
             scraped = len(platform_data.get('scraped_content', []))
             
-            report += f"\n📱 {platform_display.upper()}\n"
-            report += f"   ├─ URLs Found: {urls_found}\n"
-            report += f"   ├─ Successfully Scraped: {scraped}\n"
+            report += f"\n[{platform_display.upper()}]\n"
+            report += f"  URLs Found: {urls_found}\n"
+            report += f"  Successfully Scraped: {scraped}\n"
             
             if platform_data.get('urls'):
-                report += f"   ├─ Top URLs:\n"
+                report += f"  Top URLs:\n"
                 for url_data in platform_data['urls'][:2]:
-                    report += f"   │  ├─ {url_data['url'][:60]}...\n"
+                    report += f"    - {url_data['url'][:60]}...\n"
             
             if platform_data.get('scraped_content'):
-                report += f"   └─ Extracted Data Fields:\n"
+                report += f"  Extracted Data Fields:\n"
                 for scraped_item in platform_data['scraped_content']:
                     fields = scraped_item['extracted'].keys()
-                    report += f"      └─ {scraped_item['url'][:50]}...\n"
+                    report += f"    From: {scraped_item['url'][:50]}...\n"
                     for field in fields:
-                        status = "✓" if scraped_item['extracted'][field] != "[NOT FOUND]" else "✗"
-                        report += f"         ├─ {status} {field}\n"
+                        status = "[OK]" if scraped_item['extracted'][field] != "[NOT FOUND]" else "[X]"
+                        report += f"      {status} {field}\n"
             else:
-                report += f"   └─ ⚠️  No content scraped\n"
+                report += f"  [WARNING] No content scraped\n"
         
-        report += f"\n{'━'*80}\n"
-        report += f"\n✅ AUDIT COMPLETE: {sum(len(p.get('scraped_content', [])) for p in research['platforms'].values())} pages scraped across {len(research['platforms'])} platforms\n"
+        report += f"\n{'='*80}\n"
+        report += f"\n[SUCCESS] AUDIT COMPLETE: {sum(len(p.get('scraped_content', [])) for p in research['platforms'].values())} pages scraped across {len(research['platforms'])} platforms\n"
         
         return report
 
@@ -282,3 +282,5 @@ if __name__ == "__main__":
     context = sys.argv[4] if len(sys.argv) > 4 else "General research"
     
     run_deep_research(name, role, company, context)
+
+

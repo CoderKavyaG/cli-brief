@@ -755,10 +755,11 @@ Must include exact URL: [Source: full-url-here]]
 
 
 def main():
-    """Entry point"""
+    """Entry point - use deep research by default"""
     if len(sys.argv) < 3:
         print("Usage: python -m phase1_agent.main <name> <role> [company] [context]")
         print("Example: python -m phase1_agent.main 'Albinder Dhindsa' 'CEO' 'Blinkit' 'I want to pitch supply chain tool'")
+        print("\nNote: This uses DEEP RESEARCH across 5 platforms (LinkedIn, Twitter, GitHub, Personal Site, Company)")
         sys.exit(1)
     
     name = sys.argv[1]
@@ -768,18 +769,18 @@ def main():
     
     person = Person(name=name, role=role, company=company, context=context)
     
-    agent = IntelAgent()
-    briefing = agent.research(person)
+    # Use deep research coordinator
+    from phase1_agent.coordinator import PlatformCoordinator
+    coordinator = PlatformCoordinator()
+    research_data = coordinator.research_person_deep(person)
     
-    if briefing:
-        print("\n" + "="*60)
-        print("BRIEFING SAVED")
-        print("="*60)
-        print(f"Research Summary:")
-        print(f"- Searches executed: {agent.search_count}")
-        print(f"- Pages scraped: {agent.scrape_count}")
-        print(f"- Successful scrapes: {agent.scrape_success}")
-        print(f"- Confidence: {'HIGH' if agent.scrape_success >= 2 else 'MEDIUM' if agent.scrape_success >= 1 else 'LOW'}")
+    # Show audit report
+    audit_report = coordinator.generate_audit_report(research_data)
+    print(audit_report)
+    
+    print("\n" + "="*60)
+    print("✅ DEEP RESEARCH COMPLETE")
+    print("="*60)
 
 
 if __name__ == "__main__":

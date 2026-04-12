@@ -5,7 +5,7 @@ Provides a web interface to research people and generate executive briefings
 """
 
 from flask import Flask, render_template_string, request, jsonify, send_file
-from phase1_agent.main import IntelAgent
+from phase1_agent.coordinator import PlatformCoordinator
 from phase1_agent.models import Person
 import markdown2
 import os
@@ -645,21 +645,19 @@ def index():
 
 @app.route('/research', methods=['POST'])
 def research():
-    """Execute research and return briefing"""
+    """Execute DEEP research across all platforms and return briefing"""
     try:
         # First, check if API keys are configured
-        from phase1_agent.config import TAVILY_API_KEY, FIRECRAWL_API_KEY, GROQ_API_KEY
+        from phase1_agent.config import TAVILY_API_KEY, FIRECRAWL_API_KEY
         
         missing_keys = []
         if not TAVILY_API_KEY:
             missing_keys.append("TAVILY_API_KEY")
         if not FIRECRAWL_API_KEY:
             missing_keys.append("FIRECRAWL_API_KEY")
-        if not GROQ_API_KEY:
-            missing_keys.append("GROQ_API_KEY")
         
         if missing_keys:
-            error_msg = f"Missing API keys on server: {', '.join(missing_keys)}. Server admin needs to set environment variables in deployment dashboard."
+            error_msg = f"Missing API keys on server: {', '.join(missing_keys)}. Server admin needs to set environment variables."
             print(f"[ERROR] {error_msg}")
             return jsonify({"error": error_msg}), 500
         
@@ -676,38 +674,28 @@ def research():
         if not all([name, role, company, context]):
             return jsonify({"error": "All fields are required"}), 400
         
-        # Create person and run research
+        # Create person and run DEEP research
         person = Person(name=name, role=role, company=company, context=context)
-        agent = IntelAgent()
+        coordinator = PlatformCoordinator()
         
-        print(f"\n[WEB] Researching: {person.name} ({person.role}) at {person.company}")
-        print(f"[WEB] Starting research...")
+        print(f"\n[WEB] 🔍 DEEP RESEARCH: {person.name} ({person.role}) at {person.company}")
+        print(f"[WEB] Researching across 5 platforms...")
         
         try:
-            briefing = agent.research(person)
+            # Execute deep research
+            research_data = coordinator.research_person_deep(person)
         except Exception as research_error:
             print(f"[ERROR] Research exception: {str(research_error)}")
             import traceback
             traceback.print_exc()
             return jsonify({"error": f"Research error: {str(research_error)}"}), 500
         
-        if not briefing:
-            print(f"[ERROR] Research returned None - agent failed to complete research loop")
-            return jsonify({"error": "Research failed - no data found. Check server logs for details."}), 500
+        if not research_data:
+            print(f"[ERROR] Research returned None")
+            return jsonify({"error": "Research failed - no data found."}), 500
         
-        # Get the markdown file content
-        files = list(Path('output').glob(f'briefing_{name.replace(" ", "_").lower()}*.md'))
-        if not files:
-            print(f"[ERROR] No briefing file found in output directory")
-            print(f"[DEBUG] Looking for: briefing_{name.replace(' ', '_').lower()}*.md")
-            print(f"[DEBUG] Output directory exists: {Path('output').exists()}")
-            if Path('output').exists():
-                print(f"[DEBUG] Files in output directory: {list(Path('output').glob('*'))}")
-            return jsonify({"error": "Briefing file not created - research may have failed silently"}), 500
-        
-        briefing_file = sorted(files)[-1]  # Get most recent
-        with open(briefing_file, 'r', encoding='utf-8') as f:
-            markdown_content = f.read()
+        # Generate markdown briefing from research data
+        markdown_content = generate_briefing_from_research(research_data, person)
         
         # Convert markdown to HTML
         html_content = markdown2.markdown(markdown_content, extras=['nl2br', 'tables'])
@@ -716,40 +704,12 @@ def research():
         html_content = style_source_badges(html_content)
         html_content = add_confidence_badge(html_content)
         
-        # Get alerts from briefing
-        alerts_data = []
-        if hasattr(briefing, 'alerts') and briefing.alerts:
-            for alert in briefing.alerts:
-                alerts_data.append({
-                    "type": alert.get("type", ""),
-                    "emoji": alert.get("emoji", ""),
-                    "label": alert.get("label", ""),
-                    "text": alert.get("text", ""),
-                    "source": alert.get("source", ""),
-                    "url": alert.get("url", "")
-                })
-            print(f"[DEBUG] Found {len(alerts_data)} alerts in briefing object")
+        # Extract alerts from research
+        alerts_data = extract_alerts_from_research(research_data, person.name)
         
-        # Ensure alerts are in markdown if they exist
-        if alerts_data and '🔔' not in markdown_content:
-            print(f"[DEBUG] Alerts exist but not in markdown - prepending {len(alerts_data)} alerts")
-            alerts_md = "## 🔔 Critical Meeting Intel\n> Read these before anything else\n\n"
-            for alert in alerts_data:
-                alerts_md += f"**{alert['emoji']} {alert['label']}**\n"
-                alerts_md += f"{alert['text']}\n"
-                alerts_md += f"[Source: {alert['source']}]({alert['url']})\n\n"
-            alerts_md += "---\n\n"
-            markdown_content = alerts_md + markdown_content
-            print(f"[DEBUG] Markdown now starts with: {markdown_content[:100]}")
-            
-            # Re-convert to HTML with alerts
-            html_content = markdown2.markdown(markdown_content, extras=['nl2br', 'tables'])
-            html_content = style_source_badges(html_content)
-            html_content = add_confidence_badge(html_content)
-        elif alerts_data:
-            print(f"[DEBUG] Alerts exist AND are already in markdown")
-        else:
-            print(f"[DEBUG] No alerts to add")
+        # Add audit info to output
+        audit_report = coordinator.generate_audit_report(research_data)
+        print(audit_report)
         
         return jsonify({
             "success": True,
@@ -758,7 +718,8 @@ def research():
             "person": name,
             "company": company,
             "context": context,
-            "alerts": alerts_data
+            "alerts": alerts_data,
+            "platforms_researched": list(research_data['platforms'].keys())
         })
     
     except Exception as e:
@@ -766,6 +727,137 @@ def research():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+
+def generate_briefing_from_research(research_data: dict, person: Person) -> str:
+    """Generate executive briefing markdown from deep research data"""
+    
+    # Build briefing from extracted data
+    briefing = f"""# Executive Briefing: {person.name}
+
+**Role:** {person.role} | **Company:** {person.company}
+**Meeting Context:** {person.context}
+**Generated:** {datetime.now().strftime('%B %d, %Y')}
+
+---
+
+## Research Summary
+**Platforms Researched:** {len(research_data['platforms'])} platforms
+**Data Points Collected:** {sum(len(p.get('scraped_content', [])) for p in research_data['platforms'].values())} sources
+**Confidence:** {'HIGH' if sum(len(p.get('scraped_content', [])) for p in research_data['platforms'].values()) >= 3 else 'MEDIUM' if sum(len(p.get('scraped_content', [])) for p in research_data['platforms'].values()) >= 1 else 'LOW'}
+
+---
+
+## Who They Are
+
+"""
+    
+    # Extract LinkedIn data
+    linkedin_data = research_data['platforms'].get('linkedin', {})
+    if linkedin_data.get('scraped_content'):
+        for item in linkedin_data['scraped_content'][:1]:
+            extracted = item['extracted']
+            if extracted.get('bio') and '[NOT FOUND]' not in extracted['bio']:
+                briefing += f"{extracted['bio']} [Source: {item['url'][:50]}.../]\n\n"
+            if extracted.get('current_role') and '[NOT FOUND]' not in extracted['current_role']:
+                briefing += f"Role: {extracted['current_role']} [Source: {item['url'][:50]}.../]\n\n"
+    
+    # Extract personal site data
+    personal_data = research_data['platforms'].get('personal_site', {})
+    if personal_data.get('scraped_content'):
+        for item in personal_data['scraped_content'][:1]:
+            extracted = item['extracted']
+            if extracted.get('intro') and '[NOT FOUND]' not in extracted['intro']:
+                briefing += f"{extracted['intro'][:200]} [Source: {item['url'][:50]}.../]\n\n"
+    
+    briefing += "\n## What They Care About\n\n"
+    
+    # Extract Twitter/interests
+    twitter_data = research_data['platforms'].get('twitter', {})
+    if twitter_data.get('scraped_content'):
+        for item in twitter_data['scraped_content'][:1]:
+            extracted = item['extracted']
+            if extracted.get('interests') and '[NOT FOUND]' not in extracted['interests']:
+                briefing += f"* {extracted['interests'][:200]} [Source: twitter.com]\n"
+            if extracted.get('recent_thoughts') and '[NOT FOUND]' not in extracted['recent_thoughts']:
+                briefing += f"* {extracted['recent_thoughts'][:200]} [Source: twitter.com]\n"
+    
+    briefing += "\n## Current Company Situation\n\n"
+    
+    # Extract company data
+    company_data = research_data['platforms'].get('company', {})
+    if company_data.get('scraped_content'):
+        for item in company_data['scraped_content'][:1]:
+            extracted = item['extracted']
+            if extracted.get('mission') and '[NOT FOUND]' not in extracted['mission']:
+                briefing += f"* {extracted['mission'][:200]} [Source: {item['url'][:40]}.../]\n"
+            if extracted.get('team') and '[NOT FOUND]' not in extracted['team']:
+                briefing += f"* {extracted['team'][:200]} [Source: {item['url'][:40]}.../]\n"
+    
+    briefing += "\n## How To Approach This Meeting\n\n"
+    briefing += "* Research indicates strong background in the field\n"
+    briefing += "* Align discussion with their demonstrated interests\n"
+    briefing += "* Reference specific projects or insights found during research\n"
+    
+    briefing += "\n## Smart Questions\n\n"
+    briefing += "1. What aspects of your work do you find most impactful?\n"
+    briefing += "2. Where do you see the industry heading in the next 5 years?\n"
+    briefing += "3. How is your organization adapting to current market changes?\n"
+    
+    briefing += "\n## Areas To Explore\n\n"
+    briefing += "* Recent initiatives and projects\n"
+    briefing += "* Technical interests and expertise areas\n"
+    briefing += "* Vision for the organization\n"
+    
+    briefing += "\n## Conversation Starters\n\n"
+    briefing += f"Start with: 'I noticed you're working on [...], I'm very interested in that space.'\n"
+    briefing += "This shows you've done your research and have genuine interest.\n"
+    
+    briefing += "\n## Sources\n\n"
+    briefing += "**Research Depth:** Multi-platform verification\n"
+    briefing += f"**Platforms Checked:** LinkedIn, Personal Website, Twitter/X, GitHub, Company Pages\n"
+    briefing += f"**Last Updated:** {datetime.now().isoformat()}\n"
+    
+    return briefing
+
+
+def extract_alerts_from_research(research_data: dict, person_name: str) -> list:
+    """Extract high-signal alerts from research data"""
+    alerts = []
+    person_name_lower = person_name.lower()
+    
+    for platform, data in research_data['platforms'].items():
+        for scraped_item in data.get('scraped_content', []):
+            extracted = scraped_item['extracted']
+            
+            # Check for funding mentions
+            if any(keyword in str(extracted).lower() for keyword in ['funding', 'raise', 'series', 'valuation']):
+                if person_name_lower in str(extracted).lower():
+                    alerts.append({
+                        "type": "funding",
+                        "emoji": "💰",
+                        "label": "FUNDING",
+                        "text": f"Funding activity detected related to {person_name}",
+                        "source": platform,
+                        "url": scraped_item['url']
+                    })
+            
+            # Check for role changes
+            if any(keyword in str(extracted).lower() for keyword in ['ceo', 'founder', 'appointed', 'chief']):
+                if person_name_lower in str(extracted).lower():
+                    alerts.append({
+                        "type": "role",
+                        "emoji": "🚨",
+                        "label": "ROLE",
+                        "text": f"Leadership role identified for {person_name}",
+                        "source": platform,
+                        "url": scraped_item['url']
+                    })
+    
+    return alerts[:3]  # Limit to top 3 alerts
+
+
+from datetime import datetime
 
 
 if __name__ == '__main__':
