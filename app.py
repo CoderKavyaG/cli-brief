@@ -393,7 +393,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <div class="header">
-            <h1>🔍 Meeting Intelligence Agent</h1>
+            <h1>[SEARCH] Meeting Intelligence Agent</h1>
             <p>Research anyone in seconds. Get an executive briefing with verified sources.</p>
         </div>
         
@@ -678,7 +678,7 @@ def research():
         person = Person(name=name, role=role, company=company, context=context)
         coordinator = PlatformCoordinator()
         
-        print(f"\n[WEB] 🔍 DEEP RESEARCH: {person.name} ({person.role}) at {person.company}")
+        print(f"\n[WEB] DEEP RESEARCH: {person.name} ({person.role}) at {person.company}")
         print(f"[WEB] Researching across 5 platforms...")
         
         try:
@@ -872,17 +872,17 @@ if __name__ == '__main__':
     print("="*60)
     
     api_status = {
-        "TAVILY_API_KEY": "✓ Set" if TAVILY_API_KEY else "✗ MISSING",
-        "FIRECRAWL_API_KEY": "✓ Set" if FIRECRAWL_API_KEY else "✗ MISSING",
-        "GROQ_API_KEY": "✓ Set" if GROQ_API_KEY else "✗ MISSING",
-        "GROQ_MODEL": f"✓ {GROQ_MODEL}" if GROQ_MODEL else "✗ MISSING"
+        "TAVILY_API_KEY": "[OK] Set" if TAVILY_API_KEY else "[MISSING]",
+        "FIRECRAWL_API_KEY": "[OK] Set" if FIRECRAWL_API_KEY else "[MISSING]",
+        "GROQ_API_KEY": "[OK] Set" if GROQ_API_KEY else "[MISSING]",
+        "GROQ_MODEL": f"[OK] {GROQ_MODEL}" if GROQ_MODEL else "[MISSING]"
     }
     
     for key, status in api_status.items():
         print(f"  {key}: {status}")
     
     if not all([TAVILY_API_KEY, FIRECRAWL_API_KEY, GROQ_API_KEY]):
-        print("\n⚠️  WARNING: Some API keys are missing!")
+        print("\n[WARNING] Some API keys are missing!")
         print("   If deploying to Railway/Render:")
         print("   1. Go to your deployment dashboard")
         print("   2. Add environment variables:")
@@ -891,7 +891,7 @@ if __name__ == '__main__':
         print("      - GROQ_API_KEY")
         print("   3. Redeploy the application")
     else:
-        print("\n✓ All API keys configured. Ready to research!")
+        print("\n[OK] All API keys configured. Ready to research!")
     
     print("="*60 + "\n")
     
@@ -904,7 +904,7 @@ if __name__ == '__main__':
     print("="*60)
     print("Starting Meeting Intelligence Agent Web UI")
     print("="*60)
-    print(f"\n🚀 Listening on http://{host}:{port}\n")
+    print(f"\n[RUNNING] Listening on http://{host}:{port}\n")
     print("Press Ctrl+C to stop the server\n")
     
     app.run(debug=debug, port=port, host=host)
