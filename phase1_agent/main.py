@@ -132,8 +132,8 @@ class IntelAgent:
     
     def _call_groq_with_tools(self, messages: List[Dict], tools: List[Dict], system_message: str = None) -> Dict:
         """Call Groq API with tool calling support"""
-        max_retries = 3
-        base_wait = 2
+        max_retries = 5  # Increased retries for rate limits
+        base_wait = 3    # Longer initial wait
         
         # Prepend system message if provided
         if system_message:
@@ -168,9 +168,19 @@ class IntelAgent:
                 if e.response.status_code == 429:  # Rate limit
                     if attempt < max_retries - 1:
                         wait_time = base_wait * (2 ** attempt)
-                        print(f"[GROQ RATE LIMIT] Retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                        print(f"\n{'='*60}")
+                        print(f"[GROQ RATE LIMITED] Hit API rate limit (429)")
+                        print(f"Reason: Groq free tier limits requests to ~30 req/min")
+                        print(f"Retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                        print(f"{'='*60}\n")
                         time.sleep(wait_time)
                         continue
+                    else:
+                        print(f"\n{'='*60}")
+                        print(f"[GROQ ERROR] Rate limit hit {max_retries} times")
+                        print(f"⚠️  SOLUTION: Wait a few minutes before trying again")
+                        print(f"{'='*60}\n")
+                        raise
                 if e.response.status_code == 400:
                     # Try to extract useful info from 400 error
                     error_text = e.response.text
@@ -429,7 +439,7 @@ IMPORTANT: You MUST call save_briefing at the end. Do not just output text. Use 
         
         # Agentic loop
         loop_count = 0
-        max_loops = 5  # Reduced - should be able to complete in 2-3 loops
+        max_loops = 3  # Reduced from 5 - fewer API calls = less rate limiting
         max_msg_history = 4  # Keep only most recent messages to minimize payload
         
         while loop_count < max_loops:
@@ -441,6 +451,12 @@ IMPORTANT: You MUST call save_briefing at the end. Do not just output text. Use 
             
             # Pass system message on EVERY call
             response = self._call_groq_with_tools(msgs_to_send, tools, system_message)
+            
+            # THROTTLE: Add delay after Groq API call to avoid rate limiting
+            # Groq free tier: ~2 requests per second max, so 1 second delay is safe
+            if loop_count < max_loops - 1:  # Don't delay on last potential loop
+                print(f"[THROTTLE] Waiting 2 seconds before next Groq call...")
+                time.sleep(2)
             
             message_content = response["choices"][0]["message"]
             
@@ -535,7 +551,7 @@ IMPORTANT: You MUST call save_briefing at the end. Do not just output text. Use 
             print(f"[TOOLS] Executing {len(tool_calls)} tool calls...")
             tool_results = []
             
-            for tool_call in tool_calls:
+            for i, tool_call in enumerate(tool_calls):
                 tool_name = tool_call["function"]["name"]
                 arguments = json.loads(tool_call["function"]["arguments"])
                 
@@ -551,6 +567,11 @@ IMPORTANT: You MUST call save_briefing at the end. Do not just output text. Use 
                     "tool_name": tool_name,
                     "result": result
                 })
+                
+                # Add throttle between tool calls (except the last one)
+                if i < len(tool_calls) - 1 and tool_name != "save_briefing":
+                    print(f"  [THROTTLE] Waiting 1 second before next tool call...")
+                    time.sleep(1)
                 
                 # If save_briefing was called, stop the loop - research is complete
                 if tool_name == "save_briefing":
