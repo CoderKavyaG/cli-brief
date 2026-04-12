@@ -18,6 +18,7 @@ from phase1_agent.prompts import SYSTEM_PROMPT, get_user_prompt
 from phase1_agent.cache import BriefingCache
 from phase1_agent.quality import BriefingValidator
 import os
+import re
 
 class IntelAgent:
     """Main agent that orchestrates research via Groq tool calling"""
@@ -32,6 +33,106 @@ class IntelAgent:
         self.scrape_count = 0
         self.scrape_success = 0
         self.scraped_contents = []  # Track all scraped content for synthesis
+        self.identity_locked = None  # Store locked identity handle for verification
+        self.verified_urls = []  # Store verified URLs that matched identity
+    
+    def find_digital_footprint(self, person):
+        """
+        Find digital identity using company+city for disambiguation
+        Lock identity by handle to prevent mixing data with other people with same name
+        """
+        footprint = {
+            "linkedin": None,
+            "instagram": None,
+            "twitter": None,
+            "github": None,
+            "personal_site": None,
+            "confirmed_urls": [],
+            "handle": None,  # LOCK: use handle to prevent identity mixing
+            "photo_url": None
+        }
+        
+        # Search with company+city for strong disambiguation
+        # This returns the CORRECT person more reliably
+        search_query = f'"{person.name}" "{person.company}"'
+        print(f"[IDENTITY] Finding {person.name} with company lock: {search_query}")
+        
+        results = self.search_tool.search(search_query, count=5)
+        
+        # Extract handle from first confirmed LinkedIn URL
+        for r in results:
+            if "linkedin.com/in/" in r.url:
+                handle_match = re.search(
+                    r'linkedin\.com/in/([a-zA-Z0-9_-]+)',
+                    r.url
+                )
+                if handle_match:
+                    footprint["handle"] = handle_match.group(1)
+                    footprint["linkedin"] = r.url
+                    footprint["confirmed_urls"].append(r.url)
+                    self.identity_locked = footprint["handle"]
+                    self.verified_urls.append(r.url)
+                    print(f"[IDENTITY LOCKED] Handle: {footprint['handle']}")
+                    print(f"[VERIFIED URL] LinkedIn: {r.url}")
+                    break
+        
+        # If we found a handle, use it for ALL subsequent searches
+        # This prevents finding wrong person when searching by name alone
+        handle = footprint["handle"]
+        
+        if handle:
+            # Search Instagram using handle to avoid name collisions
+            ig_results = self.search_tool.search(
+                f'instagram.com/{handle} OR "@{handle}"',
+                count=3
+            )
+            for r in ig_results:
+                if "instagram.com/" in r.url and handle.lower() in r.url.lower():
+                    footprint["instagram"] = r.url
+                    footprint["confirmed_urls"].append(r.url)
+                    self.verified_urls.append(r.url)
+                    print(f"[VERIFIED URL] Instagram: {r.url}")
+                    break
+            
+            # Search Twitter using handle to avoid name collisions
+            tw_results = self.search_tool.search(
+                f'twitter.com/{handle} OR x.com/{handle}',
+                count=3
+            )
+            for r in tw_results:
+                if ("twitter.com/" in r.url or "x.com/" in r.url):
+                    footprint["twitter"] = r.url
+                    footprint["confirmed_urls"].append(r.url)
+                    self.verified_urls.append(r.url)
+                    print(f"[VERIFIED URL] Twitter: {r.url}")
+                    break
+        
+        return footprint
+    
+    def is_right_person(self, content, person_name, company):
+        """
+        Verify scraped content is actually about the correct person
+        Prevents mixing data from people with same name
+        """
+        if not content:
+            return False
+        
+        content_lower = content.lower()
+        first_name = person_name.split()[0].lower()
+        last_name = person_name.split()[-1].lower() if len(person_name.split()) > 1 else ""
+        company_lower = company.lower()
+        
+        # STRICT: Must mention BOTH person name AND company
+        # This prevents finding wrong person with same name
+        has_name = (first_name in content_lower and last_name in content_lower) if last_name else first_name in content_lower
+        has_company = company_lower in content_lower
+        
+        if not (has_name and has_company):
+            print(f"[IDENTITY REJECTED] Content doesn't match {person_name} + {company}")
+            return False
+        
+        print(f"[IDENTITY VERIFIED] Content matches {person_name} + {company}")
+        return True
     
     def detect_alerts(self, scraped_contents, person_name):
         """Scan scraped content for high-signal events and return alerts"""
@@ -273,6 +374,16 @@ class IntelAgent:
                 scraped = self.scrape_tool.scrape(url, fallback_snippet="")
                 
                 if scraped and len(scraped.content) > 200:
+                    # IDENTITY VERIFICATION: Check this is about the right person
+                    person = getattr(self, 'current_person', None)
+                    if person and not self.is_right_person(scraped.content, person.name, person.company):
+                        print(f"  [IDENTITY REJECTED] Content at {url} doesn't match {person.name} + {person.company}")
+                        return json.dumps({
+                            "success": False,
+                            "url": url,
+                            "reason": "Content doesn't match identity (wrong person or company)"
+                        }, separators=(',', ':'), ensure_ascii=True)
+                    
                     self.scrape_success += 1
                     # Keep substantial content for synthesis (3000 chars = ~600 words)
                     content_capped = scraped.content[:3000]
@@ -348,26 +459,48 @@ class IntelAgent:
         print(f"RESEARCHING: {person.name} ({person.role})")
         print("="*60 + "\n")
         
+        # Store current person for identity verification in _execute_tool
+        self.current_person = person
+        
         final_briefing_content = ""  # Store briefing from save_briefing tool call
         
         # SYSTEM INSTRUCTIONS FOR GROQ (Phase 1: Search & Scrape)
+        identity_lock_prompt = f"""IDENTITY LOCK: This briefing is ONLY about {person.name} who works at {person.company}.
+
+If any scraped content mentions {person.name} in context of a DIFFERENT company or role, IGNORE that content completely.
+
+CRITICAL - Prevent mixing data from same-named people:
+- The correct person: {person.name} at {person.company}
+- Verified LinkedIn handle: Will be provided
+- Any content NOT matching these markers = WRONG PERSON = SKIP IT
+
+Example rejections:
+- If you see "{person.name}" + "PyTorch blogger" but they work at {person.company} for packaging = REJECT
+- If you see "{person.name}" + "Diamond Challenge mentor" but they work at {person.company} = CHECK if it's the same company
+- Only accept if BOTH name + company match scraped content"""
+
         system_message_research = f"""You are an Executive Briefing Specialist AI. Your task is to research a person and create an executive briefing.
+
+{identity_lock_prompt}
 
 REQUIREMENTS:
 1. SEARCH STRATEGY - Use tavily_search with SPECIFIC queries to find the person:
-   - First search: "{person.name} LinkedIn" - find their professional profile
-   - Second search: "{person.name} {person.company}" - find company-related info
-   - Only use results that ACTUALLY mention {person.name} - ignore generic articles
+   - First search: "{person.name} {person.company}" - find their professional profile
+   - Second search: "{person.name} LinkedIn profile" - find more details
+   - Only use results that ACTUALLY mention BOTH {person.name} AND {person.company} - ignore unrelated people
 2. Use jina_scrape to read the best URLs found in search results (2-3 URLs maximum)
    - PRIORITY DOMAINS: linkedin.com, github.com, {person.company if person.company not in ['Unknown', 'N/A'] else 'company website'}
    - AVOID: Generic news sites, unrelated content
-3. VERIFY: After scraping, check that content actually mentions {person.name}
+3. VERIFY IDENTITY: After scraping, check that content actually mentions {person.name} + {person.company} together
+   - If content mentions {person.name} but NOT {person.company}, SKIP it (wrong person)
+   - If content mentions another company for {person.name}, SKIP it (wrong person)
 4. After gathering verified information, ALWAYS call save_briefing tool with the complete briefing
 5. CRITICAL: Use ONLY the information from the tool results (scraped web content) in your briefing
 6. Do NOT use training data - base EVERY fact on the scraped research provided
 7. IMPORTANT: You MUST call save_briefing when ready - do NOT just generate text
 8. CRITICAL: Every factual sentence must end with [Source: domain.com]
-9. If you cannot find verified information, write [NOT FOUND]"""
+9. If you cannot find verified information for a section, write [TOO LITTLE DATA - RESEARCH FAILED]
+10. NEVER mix data about different people - when in doubt, omit it"""
         
         # Start with research phase
         system_message = system_message_research

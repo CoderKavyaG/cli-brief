@@ -52,13 +52,25 @@ class Briefing:
     alerts: List[dict] = field(default_factory=list)  # Critical meeting intel alerts
     
     def to_markdown(self) -> str:
-        """Convert briefing to markdown format"""
-        md = f"""# Briefing: {self.person.name}
+        """Convert briefing to professional markdown format with table and identity info"""
+        md = f"""# {self.person.name}
+## {self.person.role} at {self.person.company or 'n/a'}
 
-**Role:** {self.person.role}
-**Company:** {self.person.company or 'Unknown'}
-**Context:** {self.person.context or 'General meeting'}
-**Generated:** {self.timestamp}
+---
+
+### At a Glance
+
+| Property | Value |
+|---|---|
+| **Role** | {self.person.role} |
+| **Company** | {self.person.company or "Unknown"} |  
+| **Context** | {self.person.context or "General meeting"} |
+| **Generated** | {self.timestamp} |
+
+---
+
+### Why You're Meeting
+> {self.person.context or "No specific context provided"}
 
 ---
 
@@ -74,66 +86,52 @@ class Briefing:
                 md += f"[Source: {alert['source']}]({alert['url']})\n\n"
             md += "---\n\n"
         
-        md += """## Who They Are
+        md += f"""### Who They Are
 
-{who_they_are}
-
----
-
-## What They Care About Right Now
-
-{what_they_care_about}
+{self.who_they_are}
 
 ---
 
-## Their Company's Current Situation
+### What They're Working On Right Now
 
-{company_situation}
-
----
-
-## How To Approach This Meeting
-
-{meeting_approach}
+{self.what_they_care_about}
 
 ---
 
-## Three Smart Questions
+### Their Company
 
-""".format(
-            who_they_are=self.who_they_are,
-            what_they_care_about=self.what_they_care_about,
-            company_situation=self.company_situation,
-            meeting_approach=self.meeting_approach
-        )
+{self.company_situation}
+
+---
+
+### How To Approach This Meeting
+
+{self.meeting_approach}
+
+---
+
+### Three Smart Questions
+
+"""
         for i, q in enumerate(self.smart_questions, 1):
             md += f"{i}. {q}\n"
         
-        md += "\n---\n\n## Two Things To Avoid\n\n"
+        md += "\n---\n\n### Don't Do This\n\n"
         for i, a in enumerate(self.things_to_avoid, 1):
             md += f"{i}. {a}\n"
         
-        md += f"\n---\n\n## Icebreaker\n\n{self.icebreaker}\n\n"
+        md += f"\n---\n\n### Icebreaker\n\n{self.icebreaker}\n\n"
         
-        # Add social links if available
+        # Add social links if available  
         if self.social_links and any(self.social_links.values()):
-            md += "---\n\n## Connect With Them\n\n"
-            for platform, handles in sorted(self.social_links.items()):
-                if handles:
-                    for handle in handles[:2]:  # Show top 2
-                        md += f"- **{platform.upper()}**: {handle}\n"
+            md += "---\n\n### Connect With Them\n\n"
+            for platform, url in sorted(self.social_links.items()):
+                if url:
+                    md += f"- **{platform.upper()}**: {url}\n"
             md += "\n"
         
-        # Add recent activity if available
-        if self.recent_activity:
-            md += "---\n\n## Recent Activity\n\n"
-            for activity in self.recent_activity:
-                md += f"- {activity}\n"
-            md += "\n"
-        
-        md += "---\n\n## Sources\n\n"
-        for source in self.sources:
-            md += f"- {source}\n"
+        md += "---\n\n## Research Confidence\n\n"
+        md += f"**Sources**: {', '.join(self.sources)}\n"
         
         return md
     
