@@ -83,7 +83,7 @@ class PlatformCoordinator:
             "scraped_content": []
         }
         
-        for url_data in urls[:2]:  # Limit to top 2
+        for url_data in urls[:1]:  # Limit to top 1 to reduce API calls
             print(f"  -> Scraping: {url_data['url'][:50]}...")
             content = self.scraper.scrape(url_data['url'])
             
@@ -108,7 +108,7 @@ class PlatformCoordinator:
             "scraped_content": []
         }
         
-        for url_data in urls[:2]:  # Limit to top 2
+        for url_data in urls[:1]:  # Limit to top 1 to reduce API calls
             print(f"  -> Scraping: {url_data['url'][:50]}...")
             content = self.scraper.scrape(url_data['url'])
             
@@ -137,7 +137,7 @@ class PlatformCoordinator:
             "scraped_content": []
         }
         
-        for url_data in urls[:2]:  # Limit to top 2
+        for url_data in urls[:1]:  # Limit to top 1 to reduce API calls
             if "twitter" in url_data['url'].lower() or "x.com" in url_data['url'].lower():
                 print(f"  -> Scraping: {url_data['url'][:50]}...")
                 content = self.scraper.scrape(url_data['url'])
@@ -163,7 +163,7 @@ class PlatformCoordinator:
             "scraped_content": []
         }
         
-        for url_data in urls[:2]:  # Limit to top 2
+        for url_data in urls[:1]:  # Limit to top 1 to reduce API calls
             print(f"  -> Scraping: {url_data['url'][:50]}...")
             content = self.scraper.scrape(url_data['url'])
             
@@ -188,7 +188,7 @@ class PlatformCoordinator:
             "scraped_content": []
         }
         
-        for url_data in urls[:2]:  # Limit to top 2
+        for url_data in urls[:1]:  # Limit to top 1 to reduce API calls
             print(f"  -> Scraping: {url_data['url'][:50]}...")
             content = self.scraper.scrape(url_data['url'])
             
