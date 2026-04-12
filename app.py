@@ -183,25 +183,69 @@ HTML_TEMPLATE = """
         }
         
         .briefing-content h1 {
-            font-size: 24px;
-            margin: 20px 0 10px 0;
-            margin-top: 0;
-            color: #222;
+            font-size: 32px;
+            margin: 0 0 5px 0;
+            color: #111;
+            font-weight: 700;
         }
         
         .briefing-content h2 {
             font-size: 18px;
-            font-weight: 600;
-            color: #1a1a1a;
-            margin-top: 28px;
-            margin-bottom: 10px;
-            padding-bottom: 6px;
-            border-bottom: 1px solid #f0f0f0;
+            color: #666;
+            font-weight: 500;
+            margin: 0 0 20px 0;
         }
         
         .briefing-content h3 {
             font-size: 16px;
-            margin: 15px 0 8px 0;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-top: 24px;
+            margin-bottom: 12px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #e5e5e5;
+        }
+        
+        /* Professional table styling for At a Glance */
+        .briefing-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+            font-size: 14px;
+        }
+        
+        .briefing-content table tr {
+            border-bottom: 1px solid #e5e5e5;
+        }
+        
+        .briefing-content table td {
+            padding: 12px 16px;
+        }
+        
+        .briefing-content table td:first-child {
+            font-weight: 600;
+            color: #1a1a1a;
+            width: 30%;
+            background: #fafafa;
+        }
+        
+        .briefing-content table td:nth-child(2) {
+            color: #333;
+        }
+        
+        .briefing-content table tr:last-child {
+            border-bottom: none;
+        }
+        
+        /* Blockquote styling for Why You're Meeting section */
+        .briefing-content blockquote {
+            margin: 16px 0;
+            padding: 16px;
+            padding-left: 20px;
+            border-left: 4px solid #2563eb;
+            background: #f0f7ff;
+            font-style: italic;
+            color: #1a5490;
         }
         
         .briefing-content p {
@@ -220,7 +264,7 @@ HTML_TEMPLATE = """
             font-size: 15px;
             line-height: 1.7;
             color: #333;
-            margin-bottom: 6px;
+            margin-bottom: 8px;
         }
         
         .briefing-content a {
