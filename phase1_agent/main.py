@@ -296,13 +296,14 @@ class IntelAgent:
                 if "# Executive Briefing:" not in normalized:
                     normalized = f"# Executive Briefing: {name}\n\n{normalized}"
                 
-                filename = f"briefing_{name.replace(' ', '_').lower()}_{datetime.now().strftime('%Y-%m-%d')}.md"
-                self.file_tool.save_briefing(filename, normalized, OUTPUT_DIR)
-                print(f"  [SAVE] {filename}")
+                # NOTE: We will NOT save the file here. Instead, it will be saved in the research() method
+                # after alerts are detected. This ensures alerts are included in the saved file.
+                print(f"  [SAVE_BRIEFING_CALLED] Ready to save (alerts will be prepended before saving)")
                 
                 return json.dumps({
                     "success": True,
-                    "filename": filename
+                    "filename": f"briefing_{name.replace(' ', '_').lower()}_{datetime.now().strftime('%Y-%m-%d')}.md",
+                    "content": normalized  # Return the content so we can access it in research()
                 })
             
             else:
@@ -510,8 +511,25 @@ IMPORTANT: You MUST call save_briefing at the end. Do not just output text. Use 
                 
                 # Detect critical alerts
                 briefing.alerts = self.detect_alerts(self.scraped_contents, person.name)
+                print(f"[ALERTS] Detected {len(briefing.alerts)} alerts in FALLBACK PATH")
                 
-                return briefing
+                # Update markdown file to include alerts at the top
+                if briefing.alerts:
+                    print(f"[DEBUG] Has alerts, update file flag is True in FALLBACK PATH")
+                    alerts_section = "## 🔔 Critical Meeting Intel\n> Read these before anything else\n\n"
+                    for alert in briefing.alerts:
+                        alerts_section += f"**{alert['emoji']} {alert['label']}**\n"
+                        alerts_section += f"{alert['text']}\n"
+                        alerts_section += f"[Source: {alert['source']}]({alert['url']})\n\n"
+                    alerts_section += "---\n\n"
+                    
+                    # Prepend alerts to final markdown
+                    markdown_with_alerts = alerts_section + final_content
+                    filename = f"briefing_{person.name.replace(' ', '_').lower()}_{datetime.now().strftime('%Y-%m-%d')}.md"
+                    self.file_tool.save_briefing(filename, markdown_with_alerts, OUTPUT_DIR)
+                    print(f"[UPDATE] Markdown file updated with {len(briefing.alerts)} alerts - FALLBACK PATH")
+                else:
+                    print(f"[DEBUG] No alerts to update in FALLBACK PATH")
             
             # Execute tool calls
             print(f"[TOOLS] Executing {len(tool_calls)} tool calls...")
@@ -555,6 +573,37 @@ IMPORTANT: You MUST call save_briefing at the end. Do not just output text. Use 
                     
                     # Detect critical alerts
                     briefing.alerts = self.detect_alerts(self.scraped_contents, person.name)
+                    
+                    with open('debug.log', 'w', encoding='utf-8') as f:
+                        f.write(f"Detected {len(briefing.alerts)} alerts\n")
+                        f.write(f"final_briefing_content length: {len(final_briefing_content)}\n")
+                        f.write(f"final_briefing_content preview: {final_briefing_content[:100]}\n")
+                        if briefing.alerts:
+                            f.write("HAS ALERTS - will prepend\n")
+                        else:
+                            f.write("NO ALERTS\n")
+                    
+                    # Update markdown file to include alerts at the top
+                    if briefing.alerts:
+                        alerts_section = "## 🔔 Critical Meeting Intel\n> Read these before anything else\n\n"
+                        for alert in briefing.alerts:
+                            alerts_section += f"**{alert['emoji']} {alert['label']}**\n"
+                            alerts_section += f"{alert['text']}\n"
+                            alerts_section += f"[Source: {alert['source']}]({alert['url']})\n\n"
+                        alerts_section += "---\n\n"
+                        
+                        # Prepend alerts to final markdown
+                        markdown_with_alerts = alerts_section + final_briefing_content
+                        
+                        filename = f"briefing_{person.name.replace(' ', '_').lower()}_{datetime.now().strftime('%Y-%m-%d')}.md"
+                        print(f"[SAVING WITH ALERTS] {filename}")
+                        self.file_tool.save_briefing(filename, markdown_with_alerts, OUTPUT_DIR)
+                        
+                        with open('debug.log', 'a', encoding='utf-8') as f:
+                            f.write(f"SAVED FILE WITH {len(briefing.alerts)} ALERTS\n")
+                    else:
+                        with open('debug.log', 'a', encoding='utf-8') as f:
+                            f.write("NO ALERTS - no file update\n")
                     
                     return briefing
             
