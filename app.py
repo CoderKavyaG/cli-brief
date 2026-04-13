@@ -286,6 +286,9 @@ def index():
 def research():
     """Execute research and return briefing"""
     try:
+        print(f"\n{'='*60}")
+        print(f"[FLASK] /research endpoint called")
+        
         from phase1_agent.agent import IntelAgent
         
         data = request.get_json()
@@ -301,8 +304,11 @@ def research():
             return jsonify({"error": "All fields are required"}), 400
         
         # Run research
+        print(f"[FLASK] Creating agent...")
         agent = IntelAgent()
+        print(f"[FLASK] Agent created, calling research()...")
         result = agent.research(name, role, company, context)
+        print(f"[FLASK] Research complete, building response...")
         
         # Build markdown for download
         md_lines = [
@@ -375,7 +381,10 @@ def research():
     
     except Exception as e:
         import traceback
-        traceback.print_exc()
+        import sys
+        print(f"\n[ERROR] Exception in research endpoint:", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        print(f"[ERROR] Exception str: {str(e)}", file=sys.stderr)
         return jsonify({"error": str(e)}), 500
 
 
