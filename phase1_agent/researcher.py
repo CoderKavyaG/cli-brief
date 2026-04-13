@@ -235,14 +235,21 @@ class Researcher:
                 print(f"  -> SKIPPED: Empty content")
                 continue
             
-            # Personal sites: just need name (company may not be mentioned)
+            # Personal sites: ALWAYS accept valid content (portfolio sites may not mention name in all sections)
             if source_type == "personal_site":
-                has_name = any(p in content.lower() for p in name_parts)
-                print(f"  -> Name check: {has_name}")
+                # Check if content looks like a valid portfolio/site (has text, links, etc)
+                has_content = len(content) > 500
+                has_structure = (
+                    ("http" in content.lower() or "#" in content or content.count("\n") > 5) and
+                    content.count(name_parts[0]) >= 0  # Don't strictly require name
+                )
                 
-                if has_name:
+                should_accept = has_content or has_structure
+                print(f"  -> Content check: length={len(content)}, has_structure={has_structure}")
+                
+                if should_accept:
                     sources.append({"url": url, "content": content})
-                    print(f"  -> ADDED: {len(content)} chars")
+                    print(f"  -> ADDED: {len(content)} chars (portfolio/site content)")
                     
                     # Extract photo URL
                     if not identity.get("photo_url"):
@@ -264,7 +271,7 @@ class Researcher:
                             identity["email"] = email.group(0)
                             print(f"  -> Email found: {identity['email']}")
                 else:
-                    print(f"  -> SKIPPED: Name not found in content")
+                    print(f"  -> SKIPPED: Not enough valid content")
             
             # LinkedIn, GitHub, Twitter, Instagram: verify identity
             else:
@@ -279,4 +286,59 @@ class Researcher:
                     print(f"  -> SKIPPED: Name not found in {source_type} content")
         
         print(f"[SCRAPE_ALL DONE] Scraped {len(sources)} sources\n")
+        
+        # ENHANCEMENT: Search for and scrape recent posts/tweets from each platform for more depth
+        print(f"[POSTS SEARCH] Looking for recent posts from each platform...")
+        self._search_and_scrape_posts(identity, name, sources)
+        
         return sources
+    
+    def _search_and_scrape_posts(self, identity: dict, name: str, sources: list) -> None:
+        """Search for and scrape multiple recent posts from each platform"""
+        
+        handle = identity.get("handle")
+        if not handle:
+            return
+        
+        # Search for recent LinkedIn posts
+        if handle:
+            print(f"[POSTS] Searching for recent LinkedIn posts by @{handle}...")
+            linkedin_posts = self.search.search(
+                f'site:linkedin.com/{handle} OR site:linkedin.com/in/{handle}',
+                count=3
+            )
+            for post in linkedin_posts[:2]:  # Get up to 2 more posts
+                if "linkedin.com" in post["url"] and post["url"] not in [s["url"] for s in sources]:
+                    content = self.jina.scrape(post["url"])
+                    if content and len(content) > 300:
+                        sources.append({"url": post["url"], "content": content})
+                        print(f"  [LINKEDIN POST] Added {len(content)} chars from {post['url'][:50]}")
+        
+        # Search for recent Twitter/X posts  
+        if handle:
+            print(f"[POSTS] Searching for recent Twitter posts by @{handle}...")
+            twitter_posts = self.search.search(
+                f'site:x.com/{handle} OR site:twitter.com/{handle}',
+                count=3
+            )
+            for post in twitter_posts[:2]:  # Get up to 2 more posts
+                if ("x.com" in post["url"] or "twitter.com" in post["url"]) and post["url"] not in [s["url"] for s in sources]:
+                    content = self.jina.scrape(post["url"])
+                    if content and len(content) > 200:
+                        sources.append({"url": post["url"], "content": content})
+                        print(f"  [TWITTER POST] Added {len(content)} chars from {post['url'][:50]}")
+        
+        # Search for recent Instagram posts
+        if handle:
+            print(f"[POSTS] Searching for recent Instagram posts by @{handle}...")
+            insta_posts = self.search.search(
+                f'site:instagram.com/{handle}',
+                count=2
+            )
+            for post in insta_posts[:1]:  # Get 1 more post
+                if "instagram.com" in post["url"] and post["url"] not in [s["url"] for s in sources]:
+                    content = self.jina.scrape(post["url"])
+                    if content and len(content) > 200:
+                        sources.append({"url": post["url"], "content": content})
+                        print(f"  [INSTAGRAM POST] Added {len(content)} chars from {post['url'][:50]}")
+

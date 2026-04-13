@@ -192,10 +192,6 @@ function renderBriefing(d) {
     ? d.smart_questions.map((q,i) => `<li>${q}</li>`).join('')
     : `<li>${d.smart_questions}</li>`;
   
-  const avoid = Array.isArray(d.things_to_avoid)
-    ? d.things_to_avoid.map(a => `<li>${a}</li>`).join('')
-    : `<li>${d.things_to_avoid}</li>`;
-  
   document.getElementById('result').innerHTML = `
   <div class="briefing">
     <div class="profile-top">
@@ -245,11 +241,6 @@ function renderBriefing(d) {
     <div class="section">
       <h3>Smart Questions</h3>
       <ol>${questions}</ol>
-    </div>
-    
-    <div class="section">
-      <h3>Things To Avoid</h3>
-      <ol>${avoid}</ol>
     </div>
     
     <div class="section">
@@ -350,15 +341,6 @@ def research():
         
         for i, q in enumerate(result['smart_questions'], 1):
             md_lines.append(f"{i}. {q}")
-        
-        md_lines += [
-            "",
-            "## Things To Avoid",
-            "",
-        ]
-        
-        for i, a in enumerate(result['things_to_avoid'], 1):
-            md_lines.append(f"{i}. {a}")
         
         md_lines += [
             "",

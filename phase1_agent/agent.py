@@ -140,11 +140,8 @@ MEETING_APPROACH:
 SMART_QUESTIONS:
 [Write 3 numbered questions. Each must be specific and personalized based on research. No generic questions. Each ends with ?]
 
-THINGS_TO_AVOID:
-[Write 2 specific things to avoid based on research findings. Each is a complete sentence. End with periods.]
-
 ICEBREAKER:
-[One specific, genuine thing from research that shows you've done homework. Quote something real or reference a specific achievement. Must end with ?]
+[One specific, genuine thing from research that shows you've done homework. Quote something real or reference a specific achievement. Must be engaging and end with ? or !]
 
 Now write the complete briefing. Do not truncate. Do not use template language."""
 
@@ -199,9 +196,6 @@ Now write the complete briefing. Do not truncate. Do not use template language."
             "smart_questions": self._parse_list(
                 parsed.get("SMART_QUESTIONS", "")
             ),
-            "things_to_avoid": self._parse_list(
-                parsed.get("THINGS_TO_AVOID", "")
-            ),
             "icebreaker": parsed.get("ICEBREAKER", "[Not found in research]"),
             "sources": [s["url"] for s in sources],
             "timestamp": datetime.now().isoformat()
@@ -213,7 +207,7 @@ Now write the complete briefing. Do not truncate. Do not use template language."
         sections = [
             "WHO_THEY_ARE", "WHAT_THEY_CARE_ABOUT",
             "COMPANY_SITUATION", "MEETING_APPROACH",
-            "SMART_QUESTIONS", "THINGS_TO_AVOID", "ICEBREAKER"
+            "SMART_QUESTIONS", "ICEBREAKER"
         ]
         
         parsed = {}
