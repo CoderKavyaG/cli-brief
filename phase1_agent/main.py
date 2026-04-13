@@ -35,6 +35,7 @@ class IntelAgent:
         self.scraped_contents = []  # Track all scraped content for synthesis
         self.identity_locked = None  # Store locked identity handle for verification
         self.verified_urls = []  # Store verified URLs that matched identity
+        self.footprint = {}  # Store extracted footprint data (photo, bio, email, etc)
     
     def find_digital_footprint(self, person):
         """
@@ -116,6 +117,61 @@ class IntelAgent:
                 # (may not mention company name explicitly)
                 self.scraped_contents.append(site_content)
                 print(f"[FOOTPRINT SCRAPED] Personal site: {len(site_content.content)} chars")
+                
+                # CHANGE 1: Extract personal site data - photo, bio, email, github, twitter
+                content = site_content.content
+                
+                # Extract photo URL - look for ibb.co, imgur, cdn, .jpg/.png near Profile/Avatar
+                photo_match = re.search(
+                    r'(?:https?://)?(?:i\.)?(?:ibb\.co|imgur\.com|cdn|\.jpg|\.png)[^\s"\'<>]*',
+                    content,
+                    re.IGNORECASE
+                )
+                if photo_match:
+                    photo_url = photo_match.group(0)
+                    if not photo_url.startswith('http'):
+                        photo_url = 'https://' + photo_url
+                    footprint["photo_url"] = photo_url
+                    print(f"[PHOTO] Found: {photo_url}")
+                
+                # Extract email - pattern: word.chars@domain.ext
+                email_match = re.search(r'\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b', content)
+                if email_match:
+                    footprint["email"] = email_match.group(0)
+                    print(f"[EMAIL] Found: {footprint['email']}")
+                
+                # Extract GitHub URL
+                github_match = re.search(r'(?:https?://)?(?:www\.)?github\.com/[a-zA-Z0-9_-]+', content)
+                if github_match:
+                    github_url = github_match.group(0)
+                    if not github_url.startswith('http'):
+                        github_url = 'https://' + github_url
+                    footprint["github"] = github_url
+                    print(f"[GITHUB] Found: {github_url}")
+                
+                # Extract Twitter/X URL
+                twitter_match = re.search(r'(?:https?://)?(?:www\.)?(?:twitter\.com|x\.com)/[a-zA-Z0-9_]+', content)
+                if twitter_match:
+                    twitter_url = twitter_match.group(0)
+                    if not twitter_url.startswith('http'):
+                        twitter_url = 'https://' + twitter_url
+                    footprint["twitter"] = twitter_url
+                    print(f"[TWITTER] Found: {twitter_url}")
+                
+                # Extract bio - first paragraph after name
+                # Look for first substantial paragraph (100+ chars)
+                paragraphs = re.split(r'\n{2,}', content)
+                for para in paragraphs:
+                    if len(para) > 100 and person.name.lower() not in para.lower():
+                        # Skip the heading, get first real paragraph
+                        bio = ' '.join(para.split()[:50])  # First 50 words
+                        if len(bio) > 50:
+                            footprint["bio"] = bio
+                            print(f"[BIO] Found: {bio[:100]}")
+                            break
+                
+                # CHANGE 5: Store footprint on self for use in synthesis
+                self.footprint = footprint
         
         if handle:
             # Search Instagram using handle to avoid name collisions
@@ -758,6 +814,9 @@ QUALITY RULES:
                     timestamp=datetime.now().isoformat()
                 )
                 
+                # CHANGE 5: Attach footprint data to briefing
+                briefing.footprint = self.footprint
+                
                 # Detect critical alerts
                 briefing.alerts = self.detect_alerts(self.scraped_contents, person.name)
                 print(f"[ALERTS] Detected {len(briefing.alerts)} alerts in FALLBACK PATH")
@@ -825,6 +884,9 @@ QUALITY RULES:
                         timestamp=datetime.now().isoformat()
                     )
                     
+                    # CHANGE 5: Attach footprint data to briefing
+                    briefing.footprint = self.footprint
+                    
                     # Detect critical alerts
                     briefing.alerts = self.detect_alerts(self.scraped_contents, person.name)
                     
@@ -882,6 +944,24 @@ QUALITY RULES:
                 for s in self.scraped_contents
                 if s.content and len(s.content) > 100
             ])
+            
+            # CHANGE 2: Add personal site context before scraped content
+            personal_site_context = ""
+            if self.footprint:
+                fp = self.footprint
+                if fp.get('photo_url'):
+                    personal_site_context += f"PHOTO: {fp['photo_url']}\n"
+                if fp.get('bio'):
+                    personal_site_context += f"PERSONAL BIO: {fp['bio']}\n"
+                if fp.get('email'):
+                    personal_site_context += f"EMAIL: {fp['email']}\n"
+                if fp.get('github'):
+                    personal_site_context += f"GITHUB: {fp['github']}\n"
+                if fp.get('twitter'):
+                    personal_site_context += f"TWITTER: {fp['twitter']}\n"
+            
+            if personal_site_context:
+                scraped_text = personal_site_context + "\n" + scraped_text
             
             print(f"[DEBUG SYNTHESIS] {len(self.scraped_contents)} sources, {len(scraped_text)} total chars collected")
             if len(scraped_text) < 500:

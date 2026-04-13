@@ -248,6 +248,52 @@ HTML_TEMPLATE = """
             color: #1a5490;
         }
         
+        /* CHANGE 4: Profile header with photo */
+        .profile-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 24px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        
+        .profile-photo {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 3px solid #e5e7eb;
+            flex-shrink: 0;
+        }
+        
+        /* CHANGE 4: Connect table styling */
+        .briefing-content table.connect-table {
+            margin-top: 16px;
+            margin-bottom: 16px;
+        }
+        
+        .briefing-content table.connect-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        
+        .briefing-content table.connect-table td:first-child {
+            font-weight: 600;
+            color: #374151;
+            width: 140px;
+            background: #fafbfc;
+        }
+        
+        .briefing-content table.connect-table a {
+            color: #2563eb;
+            text-decoration: none;
+        }
+        
+        .briefing-content table.connect-table a:hover {
+            text-decoration: underline;
+        }
+        
         .briefing-content p {
             font-size: 15px;
             line-height: 1.7;
