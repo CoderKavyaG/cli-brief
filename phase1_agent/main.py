@@ -1020,33 +1020,67 @@ WRITE THE BRIEFING IN THIS EXACT FORMAT:
 ---
 
 ## Who They Are
-[2 sentences. Each ends with [Source: domain.com]. 
-If not in research write [NOT FOUND]]
+Write 3 sentences about {person.name} as a real human.
+Use their actual bio from the scraped content.
+Reference their age, background, what drives them personally.
+Example of good output:
+"Ishan Kumar is a 20-year-old CS undergrad at Chitkara 
+University who founded InTheBox in April 2025. He describes 
+himself as someone who loves building businesses and solving 
+problems, and when he is not studying, he is locking down 
+new clients for InTheBox. He recently won ₹1.25L at TiE U, 
+signaling early validation for his packaging startup."
+[Source: ishankumax.me]
 
-## What They Care About Right Now
-[3-4 bullet points from recent news/posts/interviews.
-Each bullet ends with [Source: domain.com]]
+## What They Care About Right Now  
+Write 4 bullet points. Each must be a full sentence with 
+a specific fact from research. No vague statements.
+Bad: "Cares about packaging innovation"
+Good: "Building custom premium packaging for brands — 
+InTheBox's tagline is 'Where Packaging Meets Innovation' 
+and they focus on the unboxing moment specifically [Source: ishankumax.me]"
 
-## Current Company Situation  
-[3-4 specific facts with dates if available.
-Each fact ends with [Source: domain.com]]
+## Current Company Situation
+Write a real paragraph about the company with numbers.
+Use every stat you found: clients, orders, satisfaction score,
+revenue milestones, awards, founding date.
+Bad: "InTheBox is a packaging company"
+Good: "InTheBox, founded in April 2025, has already served 
+500+ brands and delivered 50K+ orders with a 98% satisfaction 
+rate. [Source: inthebox.co.in] The company positions itself as a 
+premium packaging studio — design-led and experience-driven, 
+helping brands stand out through the unboxing moment."
 
 ## How To Approach This Meeting
-[3 specific tactical points based on what you found.
-Tied to meeting context: {person.context}]
+3 specific tactical points directly tied to the meeting 
+context: {person.context}
+Each point must reference something specific from research.
 
 ## Three Smart Questions
-1. [Question referencing specific thing found in research [Source: domain.com]]
-2. [Question referencing specific thing found in research [Source: domain.com]]
-3. [Question referencing specific thing found in research [Source: domain.com]]
+Each question must reference a specific fact you found.
+Bad: "What are your plans for growth?"
+Good: "You've hit 500+ brands in under a year — 
+what's the bottleneck stopping you from 10x-ing that? [Source: inthebox.co.in]"
 
 ## Two Things To Avoid
-1. [Based on specific signal from research [Source: domain.com]]
-2. [Based on specific signal from research [Source: domain.com]]
+Based only on specific signals from research.
+Not generic advice.
 
 ## Icebreaker
-[ONE specific thing from research. Quote it or reference it precisely.
-Must include exact URL: [Source: full-url-here]]
+One specific, genuine thing. Quote something real.
+Example: "I saw on your site that you won ₹1.25L at 
+TiE U — what was the pitch about and how did InTheBox 
+come from that? [Source: ishankumax.me]"
+This must be something you actually found, not invented.
+
+ABSOLUTE RULES:
+- Every section minimum 3 sentences or 3 bullet points
+- Every claim has [Source: domain] after it  
+- Never split a sentence across two sections
+- If you start writing a word, finish it before any heading
+- Zero generic phrases: no "strong background", no "passionate about",
+  no "industry leader", no "innovative solutions" without specifics
+- Use their actual words when possible — quote them
 
 ## Sources
 [List every URL that had content, one per line]
