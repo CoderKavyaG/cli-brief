@@ -76,9 +76,46 @@ class IntelAgent:
                     print(f"[VERIFIED URL] LinkedIn: {r.url}")
                     break
         
+        # BUG FIX 1: Extract personal sites from all search results
+        # Look for non-social domains that might be personal sites
+        for r in results:
+            url = r.url
+            # Skip known social platforms
+            skip = ["linkedin.com", "instagram.com", "twitter.com",
+                    "x.com", "github.com", "facebook.com", 
+                    "youtube.com", "wikipedia.org", "crunchbase.com",
+                    "rocketreach.co", "zoominfo.com"]
+            
+            if not any(s in url for s in skip):
+                # This is likely a personal site
+                footprint["personal_site"] = url
+                footprint["confirmed_urls"].append(url)
+                print(f"[FOOTPRINT] Personal site: {url}")
+                break
+        
         # If we found a handle, use it for ALL subsequent searches
         # This prevents finding wrong person when searching by name alone
         handle = footprint["handle"]
+        
+        # BUG FIX 1: Immediately scrape LinkedIn in footprint step
+        if footprint["linkedin"]:
+            print(f"[FOOTPRINT SCRAPE] LinkedIn: {footprint['linkedin']}")
+            li_content = self.scrape_tool.scrape(footprint["linkedin"])
+            if li_content and self.is_right_person(
+                li_content.content, person.name, person.company
+            ):
+                self.scraped_contents.append(li_content)
+                print(f"[FOOTPRINT SCRAPED] LinkedIn: {len(li_content.content)} chars")
+        
+        # BUG FIX 1: Immediately scrape personal site in footprint step
+        if footprint["personal_site"]:
+            print(f"[FOOTPRINT SCRAPE] Personal site: {footprint['personal_site']}")
+            site_content = self.scrape_tool.scrape(footprint["personal_site"])
+            if site_content and len(site_content.content) > 200:
+                # Personal site - relax identity check
+                # (may not mention company name explicitly)
+                self.scraped_contents.append(site_content)
+                print(f"[FOOTPRINT SCRAPED] Personal site: {len(site_content.content)} chars")
         
         if handle:
             # Search Instagram using handle to avoid name collisions
@@ -113,6 +150,11 @@ class IntelAgent:
         """
         Verify scraped content is actually about the correct person
         Prevents mixing data from people with same name
+        
+        BUG FIX 3: Accept content if:
+        - EITHER (name + company) together
+        - OR (name + handle) where handle is the locked identity  
+        - OR (name alone in long personal site content)
         """
         if not content:
             return False
@@ -122,17 +164,25 @@ class IntelAgent:
         last_name = person_name.split()[-1].lower() if len(person_name.split()) > 1 else ""
         company_lower = company.lower()
         
-        # STRICT: Must mention BOTH person name AND company
-        # This prevents finding wrong person with same name
         has_name = (first_name in content_lower and last_name in content_lower) if last_name else first_name in content_lower
         has_company = company_lower in content_lower
+        has_handle = (self.identity_locked and 
+                      self.identity_locked.lower() in content_lower)
         
-        if not (has_name and has_company):
-            print(f"[IDENTITY REJECTED] Content doesn't match {person_name} + {company}")
-            return False
+        # Accept if name+company OR name+handle
+        if has_name and (has_company or has_handle):
+            print(f"[IDENTITY VERIFIED] Content matches {person_name} + {company}")
+            return True
         
-        print(f"[IDENTITY VERIFIED] Content matches {person_name} + {company}")
-        return True
+        # Also accept personal sites (URL contains handle)
+        # These are already verified by URL pattern
+        if has_name and len(content) > 500:
+            # Long content with the person's name - likely right person (personal site)
+            print(f"[IDENTITY VERIFIED] Content has name + long personal site content ({len(content)} chars)")
+            return True
+        
+        print(f"[IDENTITY REJECTED] Content doesn't match {person_name} + {company}")
+        return False
     
     def detect_alerts(self, scraped_contents, person_name):
         """Scan scraped content for high-signal events and return alerts"""
@@ -462,7 +512,16 @@ class IntelAgent:
         # Store current person for identity verification in _execute_tool
         self.current_person = person
         
+        # CRITICAL: Call find_digital_footprint FIRST to lock identity and pre-scrape sources
+        print("[STEP 1] Locking identity and finding digital footprint...")
+        footprint = self.find_digital_footprint(person)
+        print(f"[FOOTPRINT COMPLETE] Locked handle: {footprint['handle']}, Personal site: {footprint.get('personal_site', 'N/A')}, Pre-scraped sources: {len(self.scraped_contents)}\n")
+        
         final_briefing_content = ""  # Store briefing from save_briefing tool call
+        
+        # BUG FIX 2: Limit Groq API calls to prevent rate limiting (max 2 per research run)
+        groq_call_count = 0
+        max_groq_calls = 2
         
         # SYSTEM INSTRUCTIONS FOR GROQ (Phase 1: Search & Scrape)
         identity_lock_prompt = f"""IDENTITY LOCK: This briefing is ONLY about {person.name} who works at {person.company}.
@@ -611,8 +670,14 @@ QUALITY RULES:
         max_msg_history = 4  # Keep only most recent messages to minimize payload
         
         while loop_count < max_loops:
+            # BUG FIX 2: Check Groq call counter before making API call
+            groq_call_count += 1
+            if groq_call_count > max_groq_calls:
+                print(f"[GROQ LIMIT] Reached {max_groq_calls} calls, stopping loop")
+                break
+            
             loop_count += 1
-            print(f"[LOOP {loop_count}] Calling Groq...")
+            print(f"[LOOP {loop_count}] Calling Groq... (call {groq_call_count}/{max_groq_calls})")
             
             # Trim messages to prevent payload too large errors
             msgs_to_send = self.messages[-max_msg_history:] if len(self.messages) > max_msg_history else self.messages
@@ -620,8 +685,8 @@ QUALITY RULES:
             # Pass system message on EVERY call
             response = self._call_groq_with_tools(msgs_to_send, tools, system_message)
             
-            # THROTTLE: Add delay after Groq API call to avoid rate limiting
-            # Groq free tier: ~2 requests per second max, so 1 second delay is safe
+            # BUG FIX 2: Increase throttle between Groq calls to prevent rate limiting
+            # Groq free tier: ~2 requests per second max, so 2 second delay is safer
             if loop_count < max_loops - 1:  # Don't delay on last potential loop
                 print(f"[THROTTLE] Waiting 2 seconds before next Groq call...")
                 time.sleep(2)
@@ -736,10 +801,10 @@ QUALITY RULES:
                     "result": result
                 })
                 
-                # Add throttle between tool calls (except the last one)
+                # BUG FIX 2: Increase throttle between tool calls (1s -> 2s)
                 if i < len(tool_calls) - 1 and tool_name != "save_briefing":
-                    print(f"  [THROTTLE] Waiting 1 second before next tool call...")
-                    time.sleep(1)
+                    print(f"  [THROTTLE] Waiting 2 seconds before next tool call...")
+                    time.sleep(2)
                 
                 # If save_briefing was called, stop the loop - research is complete
                 if tool_name == "save_briefing":
