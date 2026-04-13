@@ -155,13 +155,14 @@ function renderBriefing(d) {
   const confClass = conf === 'HIGH' ? 'conf-high' : 
                     conf === 'MEDIUM' ? 'conf-medium' : 'conf-low';
   
-  const photoHtml = identity.photo_url 
-    ? `<img src="${identity.photo_url}" class="profile-photo" onerror="this.style.display='none'" />`
+  const photoUrl = d.photo_url || identity.photo_url;
+  const photoHtml = photoUrl 
+    ? `<img src="${photoUrl}" class="profile-photo" onerror="this.style.display='none'" alt="${d.name}" />`
     : '';
   
   let connectHtml = '';
   if (identity.linkedin_url) {
-    const handle = identity.handle || 'Profile';
+    const handle = identity.handle || d.linkedin_handle || 'Profile';
     connectHtml += `<a href="${identity.linkedin_url}" target="_blank" class="link-btn">LinkedIn @${handle}</a>`;
   }
   if (identity.github) {

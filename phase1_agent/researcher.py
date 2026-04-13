@@ -341,4 +341,108 @@ class Researcher:
                     if content and len(content) > 200:
                         sources.append({"url": post["url"], "content": content})
                         print(f"  [INSTAGRAM POST] Added {len(content)} chars from {post['url'][:50]}")
+        
+        # Extract profile image if not found yet
+        if not identity.get("photo_url"):
+            print(f"[PHOTO] Searching for profile image...")
+            self._extract_profile_image(identity, name, handle)
+    
+    def _extract_profile_image(self, identity: dict, name: str, handle: str) -> None:
+        """Search for and extract profile image from various platforms"""
+        
+        if not handle:
+            return
+        
+        # Priority: LinkedIn > Twitter > Instagram > GitHub > Google Images
+        
+        # 1. Try LinkedIn profile picture
+        print(f"[PHOTO] Searching LinkedIn profile image...")
+        linkedin_results = self.search.search(
+            f'linkedin.com/in/{handle} profile picture OR photo',
+            count=2
+        )
+        for result in linkedin_results:
+            if "linkedin.com" in result["url"]:
+                # Scrape and look for image links
+                content = self.jina.scrape(result["url"])
+                if content:
+                    # Look for profile image URLs
+                    images = re.findall(r'(https://[^\s"\'<>]*?linkedin[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp))', content)
+                    if images:
+                        identity["photo_url"] = images[0]
+                        print(f"  [PHOTO FOUND] LinkedIn: {identity['photo_url'][:60]}")
+                        return
+        
+        # 2. Try Twitter/X profile picture
+        if not identity.get("photo_url"):
+            print(f"[PHOTO] Searching X/Twitter profile image...")
+            twitter_results = self.search.search(
+                f'x.com/{handle} OR twitter.com/{handle}',
+                count=2
+            )
+            for result in twitter_results:
+                if "x.com" in result["url"] or "twitter.com" in result["url"]:
+                    content = self.jina.scrape(result["url"])
+                    if content:
+                        # Look for profile image URLs (pbs.twimg.com or similar)
+                        images = re.findall(r'(https://[^\s"\'<>]*?(?:pbs\.twimg|twitter|x\.com)[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp))', content)
+                        if images:
+                            identity["photo_url"] = images[0]
+                            print(f"  [PHOTO FOUND] Twitter: {identity['photo_url'][:60]}")
+                            return
+        
+        # 3. Try Instagram profile picture
+        if not identity.get("photo_url"):
+            print(f"[PHOTO] Searching Instagram profile image...")
+            instagram_results = self.search.search(
+                f'instagram.com/{handle}',
+                count=1
+            )
+            for result in instagram_results:
+                if "instagram.com" in result["url"]:
+                    content = self.jina.scrape(result["url"])
+                    if content:
+                        # Look for profile image URLs
+                        images = re.findall(r'(https://[^\s"\'<>]*?instagram[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp))', content)
+                        if images:
+                            identity["photo_url"] = images[0]
+                            print(f"  [PHOTO FOUND] Instagram: {identity['photo_url'][:60]}")
+                            return
+        
+        # 4. Try GitHub profile picture
+        if not identity.get("photo_url"):
+            print(f"[PHOTO] Searching GitHub profile image...")
+            github_results = self.search.search(
+                f'github.com/{handle}',
+                count=1
+            )
+            for result in github_results:
+                if "github.com" in result["url"]:
+                    content = self.jina.scrape(result["url"])
+                    if content:
+                        # GitHub avatars follow pattern: avatars.githubusercontent.com
+                        images = re.findall(r'(https://[^\s"\'<>]*?avatars\.githubusercontent\.com[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp))', content)
+                        if images:
+                            identity["photo_url"] = images[0]
+                            print(f"  [PHOTO FOUND] GitHub: {identity['photo_url'][:60]}")
+                            return
+        
+        # 5. Generic image search for the person
+        if not identity.get("photo_url"):
+            print(f"[PHOTO] Generic search for {name} profile picture...")
+            generic_results = self.search.search(
+                f'"{name}" "{identity.get("handle", "")}" profile picture headshot',
+                count=2
+            )
+            for result in generic_results:
+                if "http" in result.get("url", ""):
+                    # Extract any image URLs from the search result
+                    images = re.findall(r'(https://[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp)\b)', result.get("content", ""))
+                    if images:
+                        identity["photo_url"] = images[0]
+                        print(f"  [PHOTO FOUND] Generic search: {identity['photo_url'][:60]}")
+                        return
+        
+        if not identity.get("photo_url"):
+            print(f"  [NO PHOTO FOUND] Could not extract profile image")
 

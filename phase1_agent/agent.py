@@ -183,6 +183,8 @@ Now write the complete briefing. Do not truncate. Do not use template language."
             "context": context,
             "confidence": confidence,
             "identity": identity,
+            "photo_url": identity.get("photo_url"),
+            "linkedin_handle": identity.get("handle"),
             "who_they_are": parsed.get("WHO_THEY_ARE", "[Not found in research]"),
             "what_they_care_about": self._parse_list(
                 parsed.get("WHAT_THEY_CARE_ABOUT", "")
