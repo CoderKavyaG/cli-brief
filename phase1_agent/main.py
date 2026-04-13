@@ -939,20 +939,23 @@ QUALITY RULES:
                 })
             
             # Build scraped_text from all collected scrapes for synthesis visibility
+            # LIMIT: 600 chars per source to keep total request size within Groq limits
             scraped_text = "\n\n".join([
-                f"SOURCE: {s.url}\nCONTENT: {s.content[:1200]}"
+                f"SOURCE: {s.url}\nCONTENT: {s.content[:600]}"
                 for s in self.scraped_contents
                 if s.content and len(s.content) > 100
             ])
             
-            # CHANGE 2: Add personal site context before scraped content
+            # CHANGE 2: Add personal site context before scraped content (LIMIT TO 500 chars)
             personal_site_context = ""
             if self.footprint:
                 fp = self.footprint
                 if fp.get('photo_url'):
                     personal_site_context += f"PHOTO: {fp['photo_url']}\n"
+                # LIMIT: Truncate bio to 500 chars to avoid payload bloat
                 if fp.get('bio'):
-                    personal_site_context += f"PERSONAL BIO: {fp['bio']}\n"
+                    bio_text = fp['bio'][:500]
+                    personal_site_context += f"PERSONAL BIO: {bio_text}\n"
                 if fp.get('email'):
                     personal_site_context += f"EMAIL: {fp['email']}\n"
                 if fp.get('github'):
@@ -962,6 +965,10 @@ QUALITY RULES:
             
             if personal_site_context:
                 scraped_text = personal_site_context + "\n" + scraped_text
+            
+            # SAFETY: Cap total scraped_text to 3500 chars to stay within Groq payload limits
+            if len(scraped_text) > 3500:
+                scraped_text = scraped_text[:3500] + "\n[... research data truncated for API limits ...]"
             
             print(f"[DEBUG SYNTHESIS] {len(self.scraped_contents)} sources, {len(scraped_text)} total chars collected")
             if len(scraped_text) < 500:
