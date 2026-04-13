@@ -348,101 +348,67 @@ class Researcher:
             self._extract_profile_image(identity, name, handle)
     
     def _extract_profile_image(self, identity: dict, name: str, handle: str) -> None:
-        """Search for and extract profile image from various platforms"""
+        """Search for and extract profile image from various platforms - ONLY from official CDNs"""
         
         if not handle:
             return
         
-        # Priority: LinkedIn > Twitter > Instagram > GitHub > Google Images
+        print(f"[PHOTO] Searching for profile image...")
         
-        # 1. Try LinkedIn profile picture
-        print(f"[PHOTO] Searching LinkedIn profile image...")
-        linkedin_results = self.search.search(
-            f'linkedin.com/in/{handle} profile picture OR photo',
-            count=2
-        )
-        for result in linkedin_results:
-            if "linkedin.com" in result["url"]:
-                # Scrape and look for image links
-                content = self.jina.scrape(result["url"])
-                if content:
-                    # Look for profile image URLs
-                    images = re.findall(r'(https://[^\s"\'<>]*?linkedin[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp))', content)
-                    if images:
-                        identity["photo_url"] = images[0]
-                        print(f"  [PHOTO FOUND] LinkedIn: {identity['photo_url'][:60]}")
-                        return
+        # ONLY accept images from official platform CDNs - NO generic websites!
+        platforms_to_check = [
+            ("Twitter/X", "x.com", ["pbs.twimg.com", "twitter.com/profile_images"], 2),
+            ("LinkedIn", "linkedin.com/in", ["media.licdn.com", "linkedin.com/media", "platform.linkedin.com"], 1),
+            ("Instagram", "instagram.com", ["instagram.com/profile_images", "scontent"], 1),
+            ("GitHub", "github.com", ["avatars.githubusercontent.com"], 1),
+        ]
         
-        # 2. Try Twitter/X profile picture
-        if not identity.get("photo_url"):
-            print(f"[PHOTO] Searching X/Twitter profile image...")
-            twitter_results = self.search.search(
-                f'x.com/{handle} OR twitter.com/{handle}',
-                count=2
-            )
-            for result in twitter_results:
-                if "x.com" in result["url"] or "twitter.com" in result["url"]:
-                    content = self.jina.scrape(result["url"])
-                    if content:
-                        # Look for profile image URLs (pbs.twimg.com or similar)
-                        images = re.findall(r'(https://[^\s"\'<>]*?(?:pbs\.twimg|twitter|x\.com)[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp))', content)
-                        if images:
-                            identity["photo_url"] = images[0]
-                            print(f"  [PHOTO FOUND] Twitter: {identity['photo_url'][:60]}")
-                            return
-        
-        # 3. Try Instagram profile picture
-        if not identity.get("photo_url"):
-            print(f"[PHOTO] Searching Instagram profile image...")
-            instagram_results = self.search.search(
-                f'instagram.com/{handle}',
-                count=1
-            )
-            for result in instagram_results:
-                if "instagram.com" in result["url"]:
-                    content = self.jina.scrape(result["url"])
-                    if content:
-                        # Look for profile image URLs
-                        images = re.findall(r'(https://[^\s"\'<>]*?instagram[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp))', content)
-                        if images:
-                            identity["photo_url"] = images[0]
-                            print(f"  [PHOTO FOUND] Instagram: {identity['photo_url'][:60]}")
-                            return
-        
-        # 4. Try GitHub profile picture
-        if not identity.get("photo_url"):
-            print(f"[PHOTO] Searching GitHub profile image...")
-            github_results = self.search.search(
-                f'github.com/{handle}',
-                count=1
-            )
-            for result in github_results:
-                if "github.com" in result["url"]:
-                    content = self.jina.scrape(result["url"])
-                    if content:
-                        # GitHub avatars follow pattern: avatars.githubusercontent.com
-                        images = re.findall(r'(https://[^\s"\'<>]*?avatars\.githubusercontent\.com[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp))', content)
-                        if images:
-                            identity["photo_url"] = images[0]
-                            print(f"  [PHOTO FOUND] GitHub: {identity['photo_url'][:60]}")
-                            return
-        
-        # 5. Generic image search for the person
-        if not identity.get("photo_url"):
-            print(f"[PHOTO] Generic search for {name} profile picture...")
-            generic_results = self.search.search(
-                f'"{name}" "{identity.get("handle", "")}" profile picture headshot',
-                count=2
-            )
-            for result in generic_results:
-                if "http" in result.get("url", ""):
-                    # Extract any image URLs from the search result
-                    images = re.findall(r'(https://[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp)\b)', result.get("content", ""))
-                    if images:
-                        identity["photo_url"] = images[0]
-                        print(f"  [PHOTO FOUND] Generic search: {identity['photo_url'][:60]}")
-                        return
+        for platform_name, platform_url, official_cdns, count in platforms_to_check:
+            if identity.get("photo_url"):
+                break
+                
+            print(f"[PHOTO] Checking {platform_name}...")
+            search_query = f'site:{platform_url}/{handle}'
+            results = self.search.search(search_query, count=count)
+            
+            for result in results:
+                if identity.get("photo_url"):
+                    break
+                    
+                if platform_url in result.get("url", ""):
+                    try:
+                        content = self.jina.scrape(result["url"])
+                        if not content or len(content) < 100:
+                            continue
+                        
+                        # ONLY extract images from official platform CDNs
+                        for official_cdn in official_cdns:
+                            if identity.get("photo_url"):
+                                break
+                            
+                            # Build safe regex that ONLY matches official CDN URLs
+                            cdn_safe = official_cdn.replace(".", r"\.")
+                            pattern = rf'(https://[^\s"\'<>]*?{cdn_safe}[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp))'
+                            images = re.findall(pattern, content)
+                            
+                            # Filter out obviously fake or large image URLs
+                            for img_url in images:
+                                # Skip if URL is too long (usually fake)
+                                if len(img_url) > 300:
+                                    continue
+                                # Skip if contains common non-profile-pic patterns
+                                if any(x in img_url.lower() for x in ['banner', 'header', 'cover', 'background', 'logo', 'icon']):
+                                    continue
+                                
+                                identity["photo_url"] = img_url
+                                print(f"  [PHOTO FOUND] {platform_name}: {img_url[:60]}")
+                                return
+                    except Exception as e:
+                        print(f"  [PHOTO ERROR] {platform_name}: {str(e)[:50]}")
+                        continue
         
         if not identity.get("photo_url"):
-            print(f"  [NO PHOTO FOUND] Could not extract profile image")
+            print(f"  [NO PHOTO FOUND] No profile image from official sources")
+
+
 
