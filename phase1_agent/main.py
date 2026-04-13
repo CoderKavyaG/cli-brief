@@ -112,7 +112,8 @@ class IntelAgent:
         if footprint["personal_site"]:
             print(f"[FOOTPRINT SCRAPE] Personal site: {footprint['personal_site']}")
             site_content = self.scrape_tool.scrape(footprint["personal_site"])
-            if site_content and len(site_content.content) > 200:
+            # FILTER FIX 1: Reject 404 error pages before adding to scraped_contents
+            if site_content and len(site_content.content) > 200 and "404" not in site_content.content and "not found" not in site_content.content.lower():
                 # Personal site - relax identity check
                 # (may not mention company name explicitly)
                 self.scraped_contents.append(site_content)
@@ -162,6 +163,9 @@ class IntelAgent:
                 # Look for first substantial paragraph (100+ chars)
                 paragraphs = re.split(r'\n{2,}', content)
                 for para in paragraphs:
+                    # BIO FIX 2: Skip Jina metadata lines (URL Source, Published Time, Markdown Content, Title, etc)
+                    if para.startswith(("URL Source:", "Published Time:", "Markdown Content:", "Title:", "Warning:", "[[")):  
+                        continue
                     if len(para) > 100 and person.name.lower() not in para.lower():
                         # Skip the heading, get first real paragraph
                         bio = ' '.join(para.split()[:50])  # First 50 words
@@ -478,6 +482,15 @@ class IntelAgent:
                 self.scrape_count += 1
                 
                 scraped = self.scrape_tool.scrape(url, fallback_snippet="")
+                
+                # FILTER FIX 1: Reject error pages (404, 500, etc) before identity check
+                if scraped and "404" in scraped.content or "not found" in scraped.content.lower() or "error" in scraped.content.lower() and len(scraped.content) < 500:
+                    print(f"  [CONTENT REJECTED] {url} returned error page, skipping")
+                    return json.dumps({
+                        "success": False,
+                        "url": url,
+                        "reason": "Server returned error page"
+                    }, separators=(',', ':'), ensure_ascii=True)
                 
                 if scraped and len(scraped.content) > 200:
                     # IDENTITY VERIFICATION: Check this is about the right person
@@ -970,10 +983,9 @@ QUALITY RULES:
             if len(scraped_text) > 3500:
                 scraped_text = scraped_text[:3500] + "\n[... research data truncated for API limits ...]"
             
-            print(f"[DEBUG SYNTHESIS] {len(self.scraped_contents)} sources, {len(scraped_text)} total chars collected")
+            print(f"[SYNTHESIS] {len(self.scraped_contents)} sources, {len(scraped_text)} total chars")
             if len(scraped_text) < 500:
                 print("[WARNING] Very little research content - briefing may be low quality")
-            print(f"[DEBUG TOTAL CONTENT] {total_scrape_chars} chars of research now in messages sent to Groq")
             
             # Generate synthesis_prompt with source citation enforcement
             synthesis_prompt = f"""You are writing an executive briefing for a meeting with {person.name}.
@@ -994,7 +1006,7 @@ NEVER include in your output:
 - Cookie notices or login prompts
 - Any text that looks like website UI
 
-If scraped content contains mostly navigation/UI text and less than 3 real facts about the person, write [NOT FOUND] for that section instead of using the UI text as content.
+Only write [NOT FOUND] if the scraped content has NO relevant information at all (like "page not found" errors). Always try to extract meaning from real content.
 
 RULES — CRITICAL:
 - Every single factual sentence ends with [Source: domain.com]
