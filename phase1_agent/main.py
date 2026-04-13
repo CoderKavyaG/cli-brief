@@ -1161,7 +1161,7 @@ CRITICAL JSON RULES:
 
 WRITE THE BRIEFING IN THIS EXACT JSON FORMAT:
 
-{
+{{
     "who_they_are": "3 sentences about {person.name} as a real human. Use their actual bio from the scraped content. Reference their age, background, what drives them personally. Example: 'Ishan Kumar is a 20-year-old CS undergrad at Chitkara University who founded InTheBox in April 2025. He describes himself as someone who loves building businesses and solving problems, and when he is not studying, he is locking down new clients for InTheBox. He recently won ₹1.25L at TiE U, signaling early validation for his packaging startup. [Source: ishankumax.me]'",
     
     "what_they_care_about": "4 bullet points with full sentences. Each must have a specific fact from research. Example: '• Building custom premium packaging for brands — InTheBox's tagline is Where Packaging Meets Innovation and they focus on the unboxing moment specifically [Source: ishankumax.me]'",
@@ -1182,7 +1182,7 @@ WRITE THE BRIEFING IN THIS EXACT JSON FORMAT:
     ],
     
     "icebreaker": "One specific, genuine thing. Quote something real. Example: 'I saw on your site that you won ₹1.25L at TiE U — what was the pitch about and how did InTheBox come from that? [Source: ishankumax.me]' This must be something you actually found, not invented."
-}
+}}
 
 IMPORTANT: You MUST complete every sentence fully. Never truncate.
 If you are running low on space, write shorter sentences but always complete them.
