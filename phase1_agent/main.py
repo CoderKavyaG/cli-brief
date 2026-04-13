@@ -20,7 +20,80 @@ from phase1_agent.quality import BriefingValidator
 import os
 import re
 
-class IntelAgent:
+
+def validate_briefing_fields(data: dict) -> dict:
+    """
+    Validate and fix briefing JSON fields to ensure completeness.
+    - Trim fields at last complete sentence (ending with . ! ?)
+    - Ensure smart_questions is list of 3 complete questions with ?
+    - Ensure things_to_avoid is list of 2+ complete items
+    """
+    fields = ['who_they_are', 'what_they_care_about', 
+              'company_situation', 'meeting_approach', 'icebreaker']
+    
+    for field in fields:
+        if field in data and data[field]:
+            text = str(data[field]).strip()
+            # If text doesn't end with punctuation, it was cut off - trim to last complete sentence
+            if text and text[-1] not in '.!?':
+                # Find the last complete sentence
+                last_period = max(
+                    text.rfind('.'), 
+                    text.rfind('!'), 
+                    text.rfind('?')
+                )
+                if last_period > 20:  # Only trim if there's substantial content before
+                    data[field] = text[:last_period + 1]
+                    print(f"[TRIMMED] {field} cut at last complete sentence")
+    
+    # Ensure smart_questions is list of complete strings ending with ?
+    if 'smart_questions' in data:
+        qs = data['smart_questions']
+        if isinstance(qs, list):
+            cleaned_qs = []
+            for q in qs:
+                if isinstance(q, str) and len(q.strip()) > 10:
+                    q = q.strip()
+                    # Ensure question ends with ?
+                    if not q.endswith('?'):
+                        q = q + '?' if q[-1] not in '.!?' else q.replace(q[-1], '?')
+                    cleaned_qs.append(q)
+            data['smart_questions'] = cleaned_qs
+        
+        # Ensure exactly 3 questions
+        while len(data['smart_questions']) < 3:
+            data['smart_questions'].append(
+                "What are the biggest opportunities you see for growth?"
+            )
+        data['smart_questions'] = data['smart_questions'][:3]
+    else:
+        data['smart_questions'] = [
+            "What are the biggest opportunities you see for growth?"
+        ]
+    
+    # Ensure things_to_avoid is list
+    if 'things_to_avoid' in data:
+        avoids = data['things_to_avoid']
+        if isinstance(avoids, list):
+            cleaned_avoids = [
+                a.strip() for a in avoids 
+                if isinstance(a, str) and len(a.strip()) > 5
+            ]
+            data['things_to_avoid'] = cleaned_avoids
+        else:
+            data['things_to_avoid'] = []
+    else:
+        data['things_to_avoid'] = []
+    
+    while len(data['things_to_avoid']) < 2:
+        data['things_to_avoid'].append(
+            "Avoid making assumptions without asking first."
+        )
+    
+    return data
+
+
+
     """Main agent that orchestrates research via Groq tool calling"""
     
     def __init__(self):
@@ -384,7 +457,7 @@ class IntelAgent:
                         "messages": messages_to_send,
                         "tools": tools,
                         "temperature": 0.7,
-                        "max_tokens": 2000
+                        "max_tokens": 3000
                     },
                     headers=headers,
                     timeout=30
@@ -785,44 +858,99 @@ QUALITY RULES:
                 # Extract final briefing from last message
                 final_content = message_content.get("content", "")
                 
-                if final_content:
-                    import re
-                    # Normalize section headers if needed
-                    normalized_content = final_content
-                    
-                    # Add main title if missing
-                    if "# Executive Briefing:" not in normalized_content:
-                        normalized_content = f"# Executive Briefing: {person.name}\n\n{normalized_content}"
-                    
-                    # Replace level 3 headers (###) with level 2 (##) for consistency
-                    normalized_content = re.sub(r'^### ', '## ', normalized_content, flags=re.MULTILINE)
-                    
-                    # Normalize abbreviated section header names
-                    normalized_content = normalized_content.replace("## Who\n", "## Who They Are\n")
-                    normalized_content = normalized_content.replace("## What They Care\n", "## What They Care About\n")
-                    normalized_content = normalized_content.replace("## What\n", "## What They Care About\n")
-                    normalized_content = normalized_content.replace("## Company\n", "## Current Company Situation\n")  
-                    normalized_content = normalized_content.replace("## Approach\n", "## Meeting Approach\n")
-                    normalized_content = normalized_content.replace("## Questions\n", "## Smart Questions to Ask\n")
-                    normalized_content = normalized_content.replace("## Avoid\n", "## Things to Avoid\n")
-                    normalized_content = normalized_content.replace("## Icebreaker\n", "## Icebreaker / Common Ground\n")
-                    
-                    filename = f"briefing_{person.name.replace(' ', '_').lower()}_{datetime.now().strftime('%Y-%m-%d')}.md"
-                    self.file_tool.save_briefing(filename, normalized_content, OUTPUT_DIR)
-                    print(f"[SAVE] {filename}")
-                    
-                    final_content = normalized_content
+                briefing_data = {}
+                markdown_content = ""
                 
-                # Build briefing object with fallback content
+                if final_content:
+                    # Try to parse as JSON first
+                    try:
+                        # Extract JSON from content (may have extra text before/after)
+                        json_start = final_content.find('{')
+                        json_end = final_content.rfind('}')
+                        if json_start >= 0 and json_end > json_start:
+                            json_str = final_content[json_start:json_end + 1]
+                            briefing_data = json.loads(json_str)
+                            print("[PARSE] JSON briefing detected")
+                            
+                            # Validate and fix the briefing fields
+                            briefing_data = validate_briefing_fields(briefing_data)
+                            print("[VALIDATED] Briefing fields validated and fixed")
+                    except json.JSONDecodeError as e:
+                        print(f"[FALLBACK] Could not parse JSON: {str(e)[:50]}... using text content")
+                        # If not JSON, treat as markdown and extract sections
+                        briefing_data = {
+                            "who_they_are": final_content[:400],
+                            "what_they_care_about": final_content[400:900],
+                            "company_situation": final_content[900:1400],
+                            "meeting_approach": final_content[1400:1900],
+                            "icebreaker": final_content[1900:2100],
+                            "smart_questions": ["See full briefing"],
+                            "things_to_avoid": ["See full briefing"]
+                        }
+                    
+                    # Build markdown for file saving
+                    markdown_content = f"""# Executive Briefing: {person.name}
+**Role:** {person.role} | **Company:** {person.company}
+**Meeting Context:** {person.context}
+**Generated:** {datetime.now().strftime('%B %d, %Y')}
+
+---
+
+## Who They Are
+{briefing_data.get('who_they_are', '[NOT FOUND]')}
+
+---
+
+## What They Care About
+{briefing_data.get('what_they_care_about', '[NOT FOUND]')}
+
+---
+
+## Current Company Situation
+{briefing_data.get('company_situation', '[NOT FOUND]')}
+
+---
+
+## How To Approach This Meeting
+{briefing_data.get('meeting_approach', '[NOT FOUND]')}
+
+---
+
+## Three Smart Questions
+"""
+                    for i, q in enumerate(briefing_data.get('smart_questions', []), 1):
+                        markdown_content += f"{i}. {q}\n"
+                    
+                    markdown_content += """
+---
+
+## Things To Avoid
+"""
+                    for i, a in enumerate(briefing_data.get('things_to_avoid', []), 1):
+                        markdown_content += f"{i}. {a}\n"
+                    
+                    markdown_content += f"""
+---
+
+## Icebreaker
+{briefing_data.get('icebreaker', '[NOT FOUND]')}
+"""
+                    
+                    # Save markdown file
+                    filename = f"briefing_{person.name.replace(' ', '_').lower()}_{datetime.now().strftime('%Y-%m-%d')}.md"
+                    self.file_tool.save_briefing(filename, markdown_content, OUTPUT_DIR)
+                    print(f"[SAVE] {filename}")
+                
+                # Build briefing object from validated data
                 briefing = Briefing(
                     person=person,
-                    who_they_are=final_content[:400],
-                    what_they_care_about=final_content[400:900],
-                    company_situation=final_content[900:1400],
-                    meeting_approach=final_content[1400:1900],
-                    smart_questions=["See full briefing"],
-                    things_to_avoid=["See full briefing"],
-                    icebreaker=final_content[1900:2100],
+                    who_they_are=briefing_data.get("who_they_are", ""),
+                    what_they_care_about=briefing_data.get("what_they_care_about", ""),
+                    company_situation=briefing_data.get("company_situation", ""),
+                    meeting_approach=briefing_data.get("meeting_approach", ""),
+                    smart_questions=briefing_data.get("smart_questions", []),
+                    things_to_avoid=briefing_data.get("things_to_avoid", []),
+                    icebreaker=briefing_data.get("icebreaker", ""),
                     sources=[f"Research: {self.search_count} searches, {self.scrape_success} scrapes"],
                     timestamp=datetime.now().isoformat()
                 )
@@ -836,7 +964,7 @@ QUALITY RULES:
                 
                 # Update markdown file to include alerts at the top
                 if briefing.alerts:
-                    print(f"[DEBUG] Has alerts, update file flag is True in FALLBACK PATH")
+                    print(f"[DEBUG] Has alerts, prepending to briefing")
                     alerts_section = "## 🔔 Critical Meeting Intel\n> Read these before anything else\n\n"
                     for alert in briefing.alerts:
                         alerts_section += f"**{alert['emoji']} {alert['label']}**\n"
@@ -845,7 +973,7 @@ QUALITY RULES:
                     alerts_section += "---\n\n"
                     
                     # Prepend alerts to final markdown
-                    markdown_with_alerts = alerts_section + final_content
+                    markdown_with_alerts = alerts_section + markdown_content
                     filename = f"briefing_{person.name.replace(' ', '_').lower()}_{datetime.now().strftime('%Y-%m-%d')}.md"
                     self.file_tool.save_briefing(filename, markdown_with_alerts, OUTPUT_DIR)
                     print(f"[UPDATE] Markdown file updated with {len(briefing.alerts)} alerts - FALLBACK PATH")
@@ -1020,87 +1148,52 @@ RULES — CRITICAL:
 - Never write a sentence without a source tag
 - Numbers, dates, names of products must all have source tags
 
-WRITE THE BRIEFING IN THIS EXACT FORMAT:
+CRITICAL JSON RULES:
+- Every JSON field must be a complete, self-contained string
+- Never start a sentence in one field and finish it in another
+- Every sentence must end with a period BEFORE the field ends
+- No field should end mid-word or mid-sentence
+- Each field is independent — do not continue text from a previous field
+- Smart questions must be a JSON array of 3 complete strings:
+  "smart_questions": ["Full question 1?", "Full question 2?", "Full question 3?"]
+- Things to avoid must be a JSON array of 2 complete strings
+- Ensure all JSON is valid and properly formatted
 
-# Executive Briefing: {person.name}
-**Role:** {person.role} | **Company:** {person.company}
-**Meeting Context:** {person.context}
-**Generated:** {datetime.now().strftime('%B %d, %Y')}
+WRITE THE BRIEFING IN THIS EXACT JSON FORMAT:
 
----
+{
+    "who_they_are": "3 sentences about {person.name} as a real human. Use their actual bio from the scraped content. Reference their age, background, what drives them personally. Example: 'Ishan Kumar is a 20-year-old CS undergrad at Chitkara University who founded InTheBox in April 2025. He describes himself as someone who loves building businesses and solving problems, and when he is not studying, he is locking down new clients for InTheBox. He recently won ₹1.25L at TiE U, signaling early validation for his packaging startup. [Source: ishankumax.me]'",
+    
+    "what_they_care_about": "4 bullet points with full sentences. Each must have a specific fact from research. Example: '• Building custom premium packaging for brands — InTheBox's tagline is Where Packaging Meets Innovation and they focus on the unboxing moment specifically [Source: ishankumax.me]'",
+    
+    "company_situation": "A real paragraph about the company with numbers. Use every stat: clients, orders, satisfaction score, revenue milestones, awards, founding date. Example: 'InTheBox, founded in April 2025, has already served 500+ brands and delivered 50K+ orders with a 98% satisfaction rate. [Source: inthebox.co.in] The company positions itself as a premium packaging studio — design-led and experience-driven, helping brands stand out through the unboxing moment.'",
+    
+    "meeting_approach": "3 specific tactical points directly tied to the meeting context: {person.context}. Each point must reference something specific from research. Write complete sentences.",
+    
+    "smart_questions": [
+        "Complete question 1 ending with ? and referencing a specific fact from research",
+        "Complete question 2 ending with ? and referencing a specific fact from research",
+        "Complete question 3 ending with ? and referencing a specific fact from research"
+    ],
+    
+    "things_to_avoid": [
+        "Specific signal from research supporting this avoidance",
+        "Another specific signal from research supporting this avoidance"
+    ],
+    
+    "icebreaker": "One specific, genuine thing. Quote something real. Example: 'I saw on your site that you won ₹1.25L at TiE U — what was the pitch about and how did InTheBox come from that? [Source: ishankumax.me]' This must be something you actually found, not invented."
+}
 
-## Research Confidence
-- Sources scraped: {len(self.scraped_contents)}
-- Total chars analyzed: {len(scraped_text)}
-- Confidence: {"HIGH" if len(self.scraped_contents) >= 3 else "MEDIUM" if len(self.scraped_contents) >= 1 else "LOW"}
-
----
-
-## Who They Are
-Write 3 sentences about {person.name} as a real human.
-Use their actual bio from the scraped content.
-Reference their age, background, what drives them personally.
-Example of good output:
-"Ishan Kumar is a 20-year-old CS undergrad at Chitkara 
-University who founded InTheBox in April 2025. He describes 
-himself as someone who loves building businesses and solving 
-problems, and when he is not studying, he is locking down 
-new clients for InTheBox. He recently won ₹1.25L at TiE U, 
-signaling early validation for his packaging startup."
-[Source: ishankumax.me]
-
-## What They Care About Right Now  
-Write 4 bullet points. Each must be a full sentence with 
-a specific fact from research. No vague statements.
-Bad: "Cares about packaging innovation"
-Good: "Building custom premium packaging for brands — 
-InTheBox's tagline is 'Where Packaging Meets Innovation' 
-and they focus on the unboxing moment specifically [Source: ishankumax.me]"
-
-## Current Company Situation
-Write a real paragraph about the company with numbers.
-Use every stat you found: clients, orders, satisfaction score,
-revenue milestones, awards, founding date.
-Bad: "InTheBox is a packaging company"
-Good: "InTheBox, founded in April 2025, has already served 
-500+ brands and delivered 50K+ orders with a 98% satisfaction 
-rate. [Source: inthebox.co.in] The company positions itself as a 
-premium packaging studio — design-led and experience-driven, 
-helping brands stand out through the unboxing moment."
-
-## How To Approach This Meeting
-3 specific tactical points directly tied to the meeting 
-context: {person.context}
-Each point must reference something specific from research.
-
-## Three Smart Questions
-Each question must reference a specific fact you found.
-Bad: "What are your plans for growth?"
-Good: "You've hit 500+ brands in under a year — 
-what's the bottleneck stopping you from 10x-ing that? [Source: inthebox.co.in]"
-
-## Two Things To Avoid
-Based only on specific signals from research.
-Not generic advice.
-
-## Icebreaker
-One specific, genuine thing. Quote something real.
-Example: "I saw on your site that you won ₹1.25L at 
-TiE U — what was the pitch about and how did InTheBox 
-come from that? [Source: ishankumax.me]"
-This must be something you actually found, not invented.
+IMPORTANT: You MUST complete every sentence fully. Never truncate.
+If you are running low on space, write shorter sentences but always complete them.
+The JSON must be valid — all strings properly closed.
 
 ABSOLUTE RULES:
-- Every section minimum 3 sentences or 3 bullet points
-- Every claim has [Source: domain] after it  
-- Never split a sentence across two sections
-- If you start writing a word, finish it before any heading
-- Zero generic phrases: no "strong background", no "passionate about",
-  no "industry leader", no "innovative solutions" without specifics
+- Every claim has [Source: domain] after it
+- Never write a sentence without a source tag
+- Zero generic phrases: no "strong background", no "passionate about", no "industry leader", no "innovative solutions" without specifics
 - Use their actual words when possible — quote them
-
-## Sources
-[List every URL that had content, one per line]
+- All JSON must be valid with proper escaping
 """
             
             # Update system message to include synthesis instructions
