@@ -801,13 +801,13 @@ def research():
     """Execute DEEP research across all platforms and return briefing"""
     try:
         # First, check if API keys are configured
-        from phase1_agent.config import TAVILY_API_KEY, FIRECRAWL_API_KEY
+        from phase1_agent.config import TAVILY_API_KEY, GROQ_API_KEY
         
         missing_keys = []
         if not TAVILY_API_KEY:
             missing_keys.append("TAVILY_API_KEY")
-        if not FIRECRAWL_API_KEY:
-            missing_keys.append("FIRECRAWL_API_KEY")
+        if not GROQ_API_KEY:
+            missing_keys.append("GROQ_API_KEY")
         
         if missing_keys:
             error_msg = f"Missing API keys on server: {', '.join(missing_keys)}. Server admin needs to set environment variables."
@@ -832,11 +832,14 @@ def research():
         agent = IntelAgent()
         
         print(f"\n[WEB] RESEARCH: {person.name} ({person.role}) at {person.company}")
+        print(f"[WEB] Context: {person.context}")
         print(f"[WEB] Using IntelAgent with identity locking...")
         
         try:
             # Execute research with identity disambiguation
+            print(f"[WEB] Calling agent.research()...")
             briefing = agent.research(person)
+            print(f"[WEB] Research returned: {type(briefing).__name__} object")
         except Exception as research_error:
             print(f"[ERROR] Research exception: {str(research_error)}")
             import traceback
@@ -844,7 +847,7 @@ def research():
             return jsonify({"error": f"Research error: {str(research_error)}"}), 500
         
         if not briefing:
-            print(f"[ERROR] Research returned None")
+            print(f"[ERROR] Research returned None or empty")
             return jsonify({"error": "Research failed - no data found."}), 500
         
         # Get markdown from briefing object

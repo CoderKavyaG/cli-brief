@@ -851,6 +851,11 @@ QUALITY RULES:
                     print(f"[UPDATE] Markdown file updated with {len(briefing.alerts)} alerts - FALLBACK PATH")
                 else:
                     print(f"[DEBUG] No alerts to update in FALLBACK PATH")
+                
+                # CRITICAL: Return the briefing object in FALLBACK PATH
+                print(f"\n[SUCCESS] RESEARCH COMPLETE (Fallback path)")
+                print(f"[STATS] Total: {self.search_count} searches, {self.scrape_count} scrapes, {self.scrape_success} successful\n")
+                return briefing
             
             # Execute tool calls
             print(f"[TOOLS] Executing {len(tool_calls)} tool calls...")

@@ -42,7 +42,12 @@ class TavilySearch:
                         source="Tavily Search"
                     )
                     results.append(result)
-                    print(f"  - {result.title[:60]}... ({result.url})")
+                    # Safe print handling Unicode
+                    import sys
+                    try:
+                        sys.stdout.write(f"  - {result.title[:60]}... ({result.url})\n")
+                    except:
+                        print(f"  - [Title] ({result.url})")
             
             print(f"[SEARCH DONE] Found {len(results)} results")
             return results
