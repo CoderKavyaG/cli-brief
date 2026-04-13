@@ -93,7 +93,7 @@ def validate_briefing_fields(data: dict) -> dict:
     return data
 
 
-
+class IntelAgent:
     """Main agent that orchestrates research via Groq tool calling"""
     
     def __init__(self):
