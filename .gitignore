@@ -1,4 +1,4 @@
-.env
+﻿.env
 .env.local
 __pycache__/
 *.pyc
@@ -9,7 +9,17 @@ dist/
 build/
 venv/
 env/
-cache/*.json
-output/*.md
+cache/
+output/
 .vscode/
 .idea/
+debug.log
+*.log
+test_*.py
+test_*.md
+DELIVERY_SUMMARY.md
+IDENTITY_DISAMBIGUATION_FIX.md
+*BRIEFING*
+briefing_*
+script.py
+*.html
