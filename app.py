@@ -6,6 +6,7 @@ Provides a web interface to research people and generate executive briefings
 
 from flask import Flask, render_template_string, request, jsonify, send_file
 from phase1_agent.coordinator import PlatformCoordinator
+from phase1_agent.main import IntelAgent
 from phase1_agent.models import Person
 import markdown2
 import os
@@ -827,28 +828,28 @@ def research():
         if not all([name, role, company, context]):
             return jsonify({"error": "All fields are required"}), 400
         
-        # Create person and run DEEP research
+        # Create person and run research with identity locking via IntelAgent
         person = Person(name=name, role=role, company=company, context=context)
-        coordinator = PlatformCoordinator()
+        agent = IntelAgent()
         
-        print(f"\n[WEB] DEEP RESEARCH: {person.name} ({person.role}) at {person.company}")
-        print(f"[WEB] Researching across 5 platforms...")
+        print(f"\n[WEB] RESEARCH: {person.name} ({person.role}) at {person.company}")
+        print(f"[WEB] Using IntelAgent with identity locking...")
         
         try:
-            # Execute deep research
-            research_data = coordinator.research_person_deep(person)
+            # Execute research with identity disambiguation
+            briefing = agent.research(person)
         except Exception as research_error:
             print(f"[ERROR] Research exception: {str(research_error)}")
             import traceback
             traceback.print_exc()
             return jsonify({"error": f"Research error: {str(research_error)}"}), 500
         
-        if not research_data:
+        if not briefing:
             print(f"[ERROR] Research returned None")
             return jsonify({"error": "Research failed - no data found."}), 500
         
-        # Generate markdown briefing from research data
-        markdown_content = generate_briefing_from_research(research_data, person)
+        # Get markdown from briefing object
+        markdown_content = briefing.to_markdown()
         
         # Convert markdown to HTML with proper cleaning and rendering
         html_content = render_briefing(markdown_content)
@@ -857,12 +858,8 @@ def research():
         html_content = style_source_badges(html_content)
         html_content = add_confidence_badge(html_content)
         
-        # Extract alerts from research
-        alerts_data = extract_alerts_from_research(research_data, person.name)
-        
-        # Add audit info to output
-        audit_report = coordinator.generate_audit_report(research_data)
-        print(audit_report)
+        # Build response with briefing data
+        alerts_data = briefing.alerts if hasattr(briefing, 'alerts') else []
         
         return jsonify({
             "success": True,
@@ -872,7 +869,7 @@ def research():
             "company": company,
             "context": context,
             "alerts": alerts_data,
-            "platforms_researched": list(research_data['platforms'].keys())
+            "platforms_researched": briefing.sources if hasattr(briefing, 'sources') else []
         })
     
     except Exception as e:
