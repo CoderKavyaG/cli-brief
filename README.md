@@ -22,7 +22,7 @@ You're about to pitch someone, interview a candidate, or meet a potential partne
 | **Runtime** | Python 3.11 |
 | **Web Framework** | Flask 3.0 |
 | **Search Engine** | Tavily API (free, no credit card) |
-| **Web Scraping** | Jina AI + Firecrawl (free tiers) |
+| **Web Scraping** | Jina AI (free, no API key needed) |
 | **LLM (optional)** | Groq (llama-3.1-8b-instant) |
 | **Deployment** | Railway.app |
 | **WSGI Server** | Gunicorn |
@@ -47,10 +47,8 @@ pip install -r requirements.txt
 2. Sign up (free tier = 1,000 searches/month)
 3. Copy your API key from the dashboard
 
-#### Firecrawl API
-1. Go to https://www.firecrawl.dev
-2. Sign up (free tier available)
-3. Copy your API key
+#### Jina API (No signup required)
+Jina provides free web scraping at r.jina.ai with no API key needed. Automatically used for content extraction.
 
 #### Groq API (Optional - for synthesis)
 1. Go to https://groq.com
@@ -61,7 +59,7 @@ pip install -r requirements.txt
 ```bash
 # In the project root directory, create .env with:
 TAVILY_API_KEY=tvly-dev-xxxxxx...
-FIRECRAWL_API_KEY=fc-xxxxxx...
+# Jina is used automatically - no key needed
 GROQ_API_KEY=gsk-xxxxxx...
 GROQ_MODEL=llama-3.1-8b-instant
 ```
@@ -168,7 +166,7 @@ In Railway dashboard:
 - Add these:
   ```
   TAVILY_API_KEY=tvly-dev-xxxxxx
-  FIRECRAWL_API_KEY=fc-xxxxxx
+  # Jina - no key required
   GROQ_API_KEY=gsk-xxxxxx (optional)
   GROQ_MODEL=llama-3.1-8b-instant
   ```
@@ -238,14 +236,14 @@ cli-brief/
 | Variable | Required | Source |
 |----------|----------|--------|
 | `TAVILY_API_KEY` | ✅ Yes | https://tavily.com |
-| `FIRECRAWL_API_KEY` | ✅ Yes | https://www.firecrawl.dev |
+| Jina (Scraping) | ✅ Included | No key needed |
 | `GROQ_API_KEY` | ⚠️ Optional | https://groq.com |
 | `GROQ_MODEL` | ⚠️ Optional | Default: llama-3.1-8b-instant |
 
 ### Rate Limits
 
 - **Tavily**: ~15 searches/day (free tier)
-- **Firecrawl**: ~50 scrapes/day (free tier)
+- **Jina**: Unlimited scrapes (free tier, no key)
 - **Groq**: 10 requests/minute (free tier)
 
 The system is designed to work within these limits with intelligent retry logic.

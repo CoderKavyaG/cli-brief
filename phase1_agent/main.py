@@ -13,7 +13,7 @@ from typing import Optional, List, Dict, Any
 
 from phase1_agent.config import GROQ_API_KEY, GROQ_MODEL, GROQ_API_URL, OUTPUT_DIR
 from phase1_agent.models import Person, Briefing, SearchResult, ScrapedContent
-from phase1_agent.tools import TavilySearch, FirecrawlScrape, FileSave, LinkExtractor
+from phase1_agent.tools import TavilySearch, JinaScrape, FileSave, LinkExtractor
 from phase1_agent.prompts import SYSTEM_PROMPT, get_user_prompt
 from phase1_agent.cache import BriefingCache
 from phase1_agent.quality import BriefingValidator
@@ -26,7 +26,7 @@ class IntelAgent:
     def __init__(self):
         self.cache = BriefingCache()
         self.search_tool = TavilySearch()
-        self.scrape_tool = FirecrawlScrape()
+        self.scrape_tool = JinaScrape()
         self.file_tool = FileSave()
         self.messages = []
         self.search_count = 0

@@ -7,7 +7,7 @@ Orchestrates multiple specialized agents to research a person deeply
 import json
 from typing import Dict, List, Optional
 from phase1_agent.models import Person, Briefing, ScrapedContent
-from phase1_agent.tools import FirecrawlScrape, FileSave
+from phase1_agent.tools import JinaScrape, FileSave
 from phase1_agent.platform_agents import (
     LinkedInAgent, PersonalSiteAgent, TwitterAgent, CompanyAgent, GitHubAgent
 )
@@ -18,7 +18,7 @@ class PlatformCoordinator:
     """Master orchestrator for multi-platform research"""
     
     def __init__(self):
-        self.scraper = FirecrawlScrape()
+        self.scraper = JinaScrape()
         self.file_tool = FileSave()
         self.platforms_researched = {}
         self.all_sources = []

@@ -51,7 +51,7 @@ class TavilySearch:
             print(f"[SEARCH ERROR] {str(e)}")
             return []
 
-class FirecrawlScrape:
+class JinaScrape:
     """Tool 2: Scrape webpage content using Jina API (no auth needed)"""
     
     @staticmethod
