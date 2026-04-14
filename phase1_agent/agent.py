@@ -109,7 +109,7 @@ class IntelAgent:
     
     def _synthesize(self, name, role, company, context, 
                     identity, sources, research_text) -> dict:
-        """Synthesize briefing using Gemini with Groq fallback on rate limit"""
+        """Synthesize briefing using Groq (primary) with Gemini fallback"""
         
         has_research = len(research_text.strip()) > 300
         confidence = "HIGH" if len(research_text) > 3000 else \
@@ -118,21 +118,21 @@ class IntelAgent:
         # Build prompt for synthesis
         prompt = self._build_synthesis_prompt(name, role, company, context, research_text, has_research)
         
-        # Try Gemini first
-        print("[MODEL] Attempting Gemini 2.5 Flash...")
-        result = self._try_gemini(prompt)
+        # Try Groq first (more reliable than Gemini for now)
+        print("[MODEL] Attempting Groq Llama 3.3...")
+        raw_response = self._synthesize_with_groq(prompt)
         
-        if result:
-            raw_response = result
-            print(f"[GEMINI SUCCESS] Got {len(raw_response)} chars")
+        if raw_response:
+            print(f"[GROQ SUCCESS] Got {len(raw_response)} chars")
         else:
-            # Fallback to Groq
-            print("[FALLBACK] Rate limit hit, switching to Groq...")
-            raw_response = self._synthesize_with_groq(prompt)
-            if raw_response:
-                print(f"[GROQ SUCCESS] Got {len(raw_response)} chars")
+            # Fallback to Gemini
+            print("[FALLBACK] Groq failed, trying Gemini...")
+            result = self._try_gemini(prompt)
+            if result:
+                raw_response = result
+                print(f"[GEMINI SUCCESS] Got {len(raw_response)} chars")
             else:
-                raise Exception("Both Gemini and Groq failed")
+                raise Exception("Both Groq and Gemini failed")
         
         # Parse the structured response
         parsed = self._parse_response(raw_response)
@@ -274,7 +274,7 @@ Now write the complete briefing. Do not truncate. Do not use template language."
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "mixtral-8x7b-32768",
+                    "model": "llama-3.3-70b-versatile",
                     "messages": [
                         {"role": "user", "content": prompt}
                     ],
