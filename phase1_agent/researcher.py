@@ -15,9 +15,15 @@ class Researcher:
         self.search = TavilySearch(api_key)
         self.jina = JinaReader()
     
-    def find_person(self, name: str, company: str, role: str) -> dict:
+    def find_person(self, name: str, company: str, role: str, rejected_urls: list = None) -> dict:
         """
         Find the RIGHT person using 3-point identity lock.
+        
+        Args:
+            name: Person's name
+            company: Company/institution
+            role: Person's role
+            rejected_urls: List of URLs to skip (for research again feature)
         
         Returns dict with identity information:
         - handle: LinkedIn handle
@@ -30,6 +36,11 @@ class Researcher:
         - email: Email extracted from content
         - verified: Whether identity was locked
         """
+        
+        if rejected_urls is None:
+            rejected_urls = []
+        
+        print(f"[REJECTION] Skipping {len(rejected_urls)} previously rejected URLs")
         
         identity = {
             "handle": None,
@@ -46,7 +57,7 @@ class Researcher:
         # Search with all three identifiers for strong disambiguation
         print(f"[SEARCH 1] Searching: \"{name}\" \"{company}\" \"{role}\"")
         results = self.search.search(
-            f'"{name}" "{company}" "{role}"', count=5
+            f'"{name}" \"{company}\" \"{role}\"', count=10  # More results to skip rejected ones
         )
         print(f"[SEARCH 1 RESULT] Got {len(results)} results")
         
@@ -54,15 +65,25 @@ class Researcher:
         if not results:
             print(f"[SEARCH 2] Retrying: \"{name}\" \"{company}\"")
             results = self.search.search(
-                f'"{name}" "{company}"', count=5
+                f'"{name}" \"{company}\"', count=10
             )
             print(f"[SEARCH 2 RESULT] Got {len(results)} results")
         
         # If still no results, try just name
         if not results:
             print(f"[SEARCH 3] Retrying: \"{name}\"")
-            results = self.search.search(name, count=5)
+            results = self.search.search(name, count=10)
             print(f"[SEARCH 3 RESULT] Got {len(results)} results")
+        
+        # Filter out rejected URLs
+        filtered_results = [r for r in results if r.get("url") not in rejected_urls]
+        print(f"[REJECTION] Filtered {len(results)} to {len(filtered_results)} (rejected {len(results) - len(filtered_results)})")
+        
+        if not filtered_results and rejected_urls:
+            print(f"[WARNING] All results were rejected, showing unfiltered")
+            filtered_results = results
+        
+        results = filtered_results
         
         # Debug: print what we got
         if results:

@@ -24,19 +24,32 @@ class IntelAgent:
         self.groq_url = "https://api.groq.com/openai/v1/chat/completions"
     
     def research(self, name: str, role: str, company: str, 
-                 context: str) -> dict:
+                 context: str, rejected_urls: list = None) -> dict:
         """
         Main research method.
+        
+        Args:
+            name: Person's name
+            role: Person's role
+            company: Company/institution
+            context: Meeting context
+            rejected_urls: List of previously tried URLs to skip (for research again)
+        
         Returns dict with all briefing data.
         """
+        if rejected_urls is None:
+            rejected_urls = []
+        
         print(f"\n{'='*60}")
         print(f"RESEARCHING: {name} ({role} at {company})")
         print(f"Context: {context}")
+        if rejected_urls:
+            print(f"REJECTING: {len(rejected_urls)} previous attempts")
         print(f"{'='*60}\n")
         
         # Step 1: Find person and lock identity
         print("[STEP 1] Finding digital footprint...")
-        identity = self.researcher.find_person(name, company, role)
+        identity = self.researcher.find_person(name, company, role, rejected_urls)
         
         if not identity["verified"]:
             print("[WARNING] Could not lock identity — proceeding with caution")
