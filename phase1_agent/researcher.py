@@ -1,15 +1,14 @@
 """
 Researcher: Find the right person and scrape their digital footprint
-with deep linking, browser automation, and parallel scraping
+with deep linking and browser automation
 """
 
 import re
 import os
-import asyncio
 from .tools import TavilySearch, JinaReader
 from .advanced_scraper import (
     IdentityLinkage, LinkedInBrowserScraper, RequestCache, 
-    ParallelScraper, DeepProfileExtractor
+    DeepProfileExtractor
 )
 
 
@@ -23,7 +22,6 @@ class Researcher:
         self.linkage = IdentityLinkage()
         self.browser_scraper = LinkedInBrowserScraper()
         self.request_cache = RequestCache(ttl_minutes=5)
-        self.parallel_scraper = ParallelScraper(max_concurrent=3)
         self.extractor = DeepProfileExtractor()
     
     def find_person(self, name: str, company: str, role: str, rejected_urls: list = None) -> dict:
@@ -250,29 +248,29 @@ class Researcher:
     
     def scrape_all(self, identity: dict, name: str, company: str) -> list:
         """
-        TIER 2: Parallel async scraping with browser automation for LinkedIn
+        TIER 2: Sequential scraping with browser automation for LinkedIn
         + TIER 3: Deep linking across platforms
         
         Returns list of {"url": str, "content": str} with verified identity.
         """
         sources = []
         
-        print(f"\n[TIER 2] Starting parallel scrape for {name}")
+        print(f"\n[TIER 2] Starting scrape for {name}")
         print(f"[IDENTITY] LinkedIn: {identity.get('linkedin_url', 'NONE')}")
         print(f"[IDENTITY] Personal: {identity.get('personal_site', 'NONE')}")
         print(f"[IDENTITY] GitHub: {identity.get('github', 'NONE')}")
         print(f"[IDENTITY] Twitter: {identity.get('twitter', 'NONE')}")
         print(f"[IDENTITY] Instagram: {identity.get('instagram', 'NONE')}")
         
-        # Build scraping tasks - LinkedIn uses browser,others use Jina
+        # Build scraping tasks - LinkedIn uses browser, others use Jina
         scrape_tasks = []
+        
+        if identity.get("linkedin_url"):
+            # Use browser automation for LinkedIn (PRIORITY)
+            scrape_tasks.append(("linkedin", identity["linkedin_url"], self.browser_scraper.scrape_profile))
         
         if identity.get("personal_site"):
             scrape_tasks.append(("personal_site", identity["personal_site"], self.jina.scrape))
-        
-        if identity.get("linkedin_url"):
-            # Use browser automation for LinkedIn (async)
-            scrape_tasks.append(("linkedin", identity["linkedin_url"], self.browser_scraper.scrape_profile))
         
         if identity.get("github"):
             scrape_tasks.append(("github", identity["github"], self.jina.scrape))
@@ -287,22 +285,28 @@ class Researcher:
             print(f"[WARNING] No URLs to scrape! Identity not found or verified.")
             return sources
         
-        print(f"[TIER 2] Will scrape {len(scrape_tasks)} URLs in parallel")
+        print(f"[TIER 2] Scraping {len(scrape_tasks)} URLs sequentially...")
         
-        # Run parallel scraping
-        try:
-            scrape_results = asyncio.run(
-                self.parallel_scraper.scrape_multiple(scrape_tasks)
-            )
-        except Exception as e:
-            print(f"[PARALLEL ERROR] {str(e)[:100]}, falling back to sequential")
-            scrape_results = {}
-            for source_type, url, scraper_func in scrape_tasks:
+        # Sequential scraping (sync, simpler, more reliable)
+        scrape_results = {}
+        for source_type, url, scraper_func in scrape_tasks:
+            try:
+                print(f"[SCRAPE] {source_type}: {url[:60]}...")
                 content = scraper_func(url)
+                
                 scrape_results[source_type] = {
                     "url": url,
                     "content": content,
                     "status": "success" if content else "empty"
+                }
+                print(f"  ✓ Got {len(content) if content else 0} chars")
+                
+            except Exception as e:
+                print(f"  ✗ Error: {str(e)[:60]}")
+                scrape_results[source_type] = {
+                    "url": url,
+                    "content": "",
+                    "status": "failed"
                 }
         
         # TIER 3: DEEP LINKING - Collect identifiers for cross-verification

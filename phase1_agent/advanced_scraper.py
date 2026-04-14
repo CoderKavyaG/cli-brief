@@ -141,51 +141,54 @@ class LinkedInBrowserScraper:
         self.browser = None
         self.context = None
     
-    async def scrape_profile(self, url: str, timeout: int = 15) -> Optional[str]:
+    def scrape_profile(self, url: str, timeout: int = 15) -> Optional[str]:
         """
-        Scrape LinkedIn profile using Playwright
+        Scrape LinkedIn profile using Playwright (sync wrapper)
         Returns: Profile content or None if unavailable
         """
         try:
-            from playwright.async_api import async_playwright
+            from playwright.sync_api import sync_playwright
         except ImportError:
-            print("[LINKEDIN] Playwright not installed, falling back to Jina")
+            print("[LINKEDIN] Playwright not installed")
             return None
         
         try:
-            async with async_playwright() as p:
-                # Use chromium without headless for speed
-                browser = await p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"])
-                
-                # Create context with user agent
-                context = await browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            with sync_playwright() as p:
+                # Launch browser with anti-detection
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=['--disable-blink-features=AutomationControlled']
                 )
                 
-                page = await context.new_page()
+                # Create context with user agent
+                context = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                )
+                
+                page = context.new_page()
                 
                 try:
-                    print(f"[LINKEDIN BROWSER] Loading: {url}")
-                    await page.goto(url, wait_until="networkidle", timeout=timeout * 1000)
+                    print(f"[LINKEDIN BROWSER] Opening: {url[:60]}")
+                    page.goto(url, wait_until="networkidle", timeout=timeout * 1000)
                     
-                    # Get page content
-                    content = await page.content()
+                    # Wait for content to load
+                    page.wait_for_load_state("networkidle")
                     
                     # Extract text content
-                    text = await page.evaluate("() => document.body.innerText")
+                    text = page.evaluate("() => document.body.innerText")
                     
-                    print(f"[LINKEDIN BROWSER] Got {len(text)} chars from {url[:50]}")
+                    browser.close()
                     
-                    await browser.close()
+                    print(f"[LINKEDIN BROWSER SUCCESS] Got {len(text)} chars")
                     return text if len(text) > 100 else None
                 
                 except Exception as e:
-                    print(f"[LINKEDIN BROWSER ERROR] {str(e)[:100]}")
-                    await browser.close()
+                    print(f"[LINKEDIN BROWSER ERROR] {str(e)[:80]}")
+                    browser.close()
                     return None
         
         except Exception as e:
-            print(f"[LINKEDIN BROWSER INIT ERROR] {str(e)[:100]}")
+            print(f"[LINKEDIN BROWSER INIT ERROR] {str(e)[:80]}")
             return None
 
 
