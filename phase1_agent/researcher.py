@@ -1,23 +1,38 @@
 """
 Researcher: Find the right person and scrape their digital footprint
+with deep linking and browser automation
 """
 
 import re
 import os
 from .tools import TavilySearch, JinaReader
+from .advanced_scraper import (
+    IdentityLinkage, LinkedInBrowserScraper, RequestCache, 
+    DeepProfileExtractor
+)
 
 
 class Researcher:
-    """Find a person's identity and scrape their digital presence"""
+    """Find a person's identity and scrape their digital presence with deep linking"""
     
     def __init__(self):
         api_key = os.getenv("TAVILY_API_KEY")
         self.search = TavilySearch(api_key)
         self.jina = JinaReader()
+        self.linkage = IdentityLinkage()
+        self.browser_scraper = LinkedInBrowserScraper()
+        self.request_cache = RequestCache(ttl_minutes=5)
+        self.extractor = DeepProfileExtractor()
     
-    def find_person(self, name: str, company: str, role: str) -> dict:
+    def find_person(self, name: str, company: str, role: str, rejected_urls: list = None) -> dict:
         """
         Find the RIGHT person using 3-point identity lock.
+        
+        Args:
+            name: Person's name
+            company: Company/institution
+            role: Person's role
+            rejected_urls: List of URLs to skip (for research again feature)
         
         Returns dict with identity information:
         - handle: LinkedIn handle
@@ -30,6 +45,11 @@ class Researcher:
         - email: Email extracted from content
         - verified: Whether identity was locked
         """
+        
+        if rejected_urls is None:
+            rejected_urls = []
+        
+        print(f"[REJECTION] Skipping {len(rejected_urls)} previously rejected URLs")
         
         identity = {
             "handle": None,
@@ -46,7 +66,7 @@ class Researcher:
         # Search with all three identifiers for strong disambiguation
         print(f"[SEARCH 1] Searching: \"{name}\" \"{company}\" \"{role}\"")
         results = self.search.search(
-            f'"{name}" "{company}" "{role}"', count=5
+            f'"{name}" \"{company}\" \"{role}\"', count=10  # More results to skip rejected ones
         )
         print(f"[SEARCH 1 RESULT] Got {len(results)} results")
         
@@ -54,15 +74,25 @@ class Researcher:
         if not results:
             print(f"[SEARCH 2] Retrying: \"{name}\" \"{company}\"")
             results = self.search.search(
-                f'"{name}" "{company}"', count=5
+                f'"{name}" \"{company}\"', count=10
             )
             print(f"[SEARCH 2 RESULT] Got {len(results)} results")
         
         # If still no results, try just name
         if not results:
             print(f"[SEARCH 3] Retrying: \"{name}\"")
-            results = self.search.search(name, count=5)
+            results = self.search.search(name, count=10)
             print(f"[SEARCH 3 RESULT] Got {len(results)} results")
+        
+        # Filter out rejected URLs
+        filtered_results = [r for r in results if r.get("url") not in rejected_urls]
+        print(f"[REJECTION] Filtered {len(results)} to {len(filtered_results)} (rejected {len(results) - len(filtered_results)})")
+        
+        if not filtered_results and rejected_urls:
+            print(f"[WARNING] All results were rejected, showing unfiltered")
+            filtered_results = results
+        
+        results = filtered_results
         
         # Debug: print what we got
         if results:
@@ -71,8 +101,11 @@ class Researcher:
                 print(f"  - {r['title'][:60]}")
                 print(f"    URL: {r['url']}")
         
-        # First pass: Look for LinkedIn /in/ profile
+        # TIER 1: SMART SEARCH - Use search metadata (titles) as verification source
         linkedin_found = False
+        name_parts = name.lower().split()
+        company_lower = company.lower()
+        
         for r in results:
             if "linkedin.com/in/" in r["url"]:
                 print(f"[LINKEDIN FOUND] {r['url']}")
@@ -82,40 +115,43 @@ class Researcher:
                     handle = match.group(1)
                     print(f"[HANDLE EXTRACTED] {handle}")
                     
-                    # Verify this result mentions name AND company
-                    combined = (r["title"] + " " + r["content"]).lower()
-                    name_parts = name.lower().split()
-                    company_lower = company.lower()
+                    # TIER 1: Use search TITLE as verification (faster, more reliable)
+                    search_title = r["title"].lower()
+                    search_content = r["content"].lower()
                     
-                    print(f"[VERIFY] Looking for: {name_parts} + {company_lower}")
-                    print(f"[VERIFY] In: {combined[:100]}...")
+                    # Check title first (from Tavily search results)
+                    name_in_title = all(p in search_title for p in name_parts)
+                    company_in_title = company_lower in search_title or \
+                                     self._fuzzy_company_match(search_title, company_lower)
                     
-                    name_check = all(p in combined for p in name_parts)
-                    company_check = company_lower in combined
+                    print(f"[TIER1 VERIFY] Title: name={name_in_title}, company={company_in_title}")
                     
-                    print(f"[VERIFY] Name match: {name_check}, Company match: {company_check}")
-                    
-                    if name_check and company_check:
+                    if name_in_title and company_in_title:
+                        # TIER 3: Initialize deep linking early
                         identity["handle"] = handle
                         identity["linkedin_url"] = r["url"]
                         identity["verified"] = True
-                        print(f"[IDENTITY LOCKED] @{handle}")
+                        identity["verification_source"] = "search_metadata"
+                        print(f"[IDENTITY LOCKED] @{handle} (from search title)")
                         linkedin_found = True
                         break
         
-        # Second pass if no /in/ found: Look for any linkedin.com URL and extract handle
+        # TIER 3: DEEP LINKING - If not found via title, still accept if LinkedIn found
+        # (we'll verify via browser scraping later and link cross-platform)
         if not linkedin_found:
             for r in results:
                 if "linkedin.com" in r["url"]:
-                    combined = (r["title"] + " " + r["content"]).lower()
-                    name_parts = name.lower().split()
-                    company_lower = company.lower()
-                    
-                    # Very flexible handle extraction from any LinkedIn URL
-                    handle = None
-                    
-                    # Try /in/handle pattern
                     match = re.search(r'/in/([a-zA-Z0-9_-]+)', r["url"])
+                    if match:
+                        handle = match.group(1)
+                        # Accept any LinkedIn profile found - we'll verify via deep linking
+                        identity["handle"] = handle
+                        identity["linkedin_url"] = r["url"]
+                        identity["verified"] = False  # Will verify via scraping + linking
+                        identity["verification_source"] = "linkedin_found"
+                        print(f"[LINKEDIN FOUND UNVERIFIED] @{handle} - will verify via deep linking")
+                        linkedin_found = True
+                        break
                     if match:
                         handle = match.group(1)
                     else:
@@ -125,7 +161,7 @@ class Researcher:
                             handle = match.group(1)
                     
                     # If we got a handle and name/company match, accept it
-                    if handle and (name_parts[0].lower() in combined and company_lower in combined):
+                    if handle and (name_parts[0].lower() in search_content and company_lower in search_content):
                         identity["handle"] = handle
                         identity["linkedin_url"] = r["url"]
                         identity["verified"] = True
@@ -135,6 +171,26 @@ class Researcher:
         
         if not linkedin_found:
             print(f"[WARNING] No LinkedIn found or identity verification failed")
+        
+        return identity
+    
+    def _fuzzy_company_match(self, text: str, company: str) -> bool:
+        """Fuzzy match company names"""
+        # Direct match
+        if company in text:
+            return True
+        
+        # Common abbreviations
+        words = company.lower().split()
+        if all(w[:3] in text for w in words if len(w) >= 3):
+            return True
+        
+        # First word + "uni" for universities
+        if "university" in text and len(words) > 0:
+            if words[0] in text:
+                return True
+        
+        return False
         
         # If handle found, search for other platforms
         if identity["handle"]:
@@ -192,257 +248,228 @@ class Researcher:
     
     def scrape_all(self, identity: dict, name: str, company: str) -> list:
         """
-        Scrape all found URLs. Return list of {"url": str, "content": str}.
-        Only include content that verifies the person's identity.
+        TIER 2: Sequential scraping with browser automation for LinkedIn
+        + TIER 3: Deep linking across platforms
+        
+        Returns list of {"url": str, "content": str} with verified identity.
         """
         sources = []
-        urls_to_scrape = []
         
-        print(f"\n[SCRAPE_ALL] Starting scrape for {name}")
+        print(f"\n[TIER 2] Starting scrape for {name}")
         print(f"[IDENTITY] LinkedIn: {identity.get('linkedin_url', 'NONE')}")
         print(f"[IDENTITY] Personal: {identity.get('personal_site', 'NONE')}")
-        print(f"[IDENTITY] Instagram: {identity.get('instagram', 'NONE')}")
         print(f"[IDENTITY] GitHub: {identity.get('github', 'NONE')}")
         print(f"[IDENTITY] Twitter: {identity.get('twitter', 'NONE')}")
+        print(f"[IDENTITY] Instagram: {identity.get('instagram', 'NONE')}")
         
-        # Priority order: personal site first (best info), then LinkedIn
-        if identity.get("personal_site"):
-            urls_to_scrape.append(("personal_site", identity["personal_site"]))
+        # Build scraping tasks - LinkedIn uses browser, others use Jina
+        scrape_tasks = []
+        
         if identity.get("linkedin_url"):
-            urls_to_scrape.append(("linkedin", identity["linkedin_url"]))
-        if identity.get("instagram"):
-            urls_to_scrape.append(("instagram", identity["instagram"]))
-        if identity.get("github"):
-            urls_to_scrape.append(("github", identity["github"]))
-        if identity.get("twitter"):
-            urls_to_scrape.append(("twitter", identity["twitter"]))
+            # Use browser automation for LinkedIn (PRIORITY)
+            scrape_tasks.append(("linkedin", identity["linkedin_url"], self.browser_scraper.scrape_profile))
         
-        if not urls_to_scrape:
+        if identity.get("personal_site"):
+            scrape_tasks.append(("personal_site", identity["personal_site"], self.jina.scrape))
+        
+        if identity.get("github"):
+            scrape_tasks.append(("github", identity["github"], self.jina.scrape))
+        
+        if identity.get("twitter"):
+            scrape_tasks.append(("twitter", identity["twitter"], self.jina.scrape))
+        
+        if identity.get("instagram"):
+            scrape_tasks.append(("instagram", identity["instagram"], self.jina.scrape))
+        
+        if not scrape_tasks:
             print(f"[WARNING] No URLs to scrape! Identity not found or verified.")
             return sources
         
-        print(f"[SCRAPE_ALL] Will scrape {len(urls_to_scrape)} URLs")
+        print(f"[TIER 2] Scraping {len(scrape_tasks)} URLs sequentially...")
         
+        # Sequential scraping (sync, simpler, more reliable)
+        scrape_results = {}
+        for source_type, url, scraper_func in scrape_tasks:
+            try:
+                print(f"[SCRAPE] {source_type}: {url[:60]}...")
+                content = scraper_func(url)
+                
+                scrape_results[source_type] = {
+                    "url": url,
+                    "content": content,
+                    "status": "success" if content else "empty"
+                }
+                print(f"  ✓ Got {len(content) if content else 0} chars")
+                
+            except Exception as e:
+                print(f"  ✗ Error: {str(e)[:60]}")
+                scrape_results[source_type] = {
+                    "url": url,
+                    "content": "",
+                    "status": "failed"
+                }
+        
+        # TIER 3: DEEP LINKING - Collect identifiers for cross-verification
+        extracted_identifiers = {
+            "linkedin_handle": identity.get("handle"),
+            "email": identity.get("email")
+        }
+        
+        # Process results and extract identity info
         name_parts = name.lower().split()
         company_lower = company.lower()
         
-        for source_type, url in urls_to_scrape[:5]:
-            print(f"[SCRAPING {source_type}] {url[:70]}")
-            content = self.jina.scrape(url)
-            print(f"[JINA RESULT] Got {len(content)} chars")
+        for source_type, result in scrape_results.items():
+            url = result.get("url")
+            content = result.get("content", "")
+            status = result.get("status")
+            time_ms = result.get("time_ms", 0)
             
-            if not content:
-                print(f"  -> SKIPPED: Empty content")
+            print(f"\n[RESULT] {source_type.upper()}: {status} ({time_ms}ms)")
+            
+            if not content or status in ["empty", "failed"]:
+                print(f"  -> SKIPPED: {status}")
                 continue
             
-            # Personal sites: ALWAYS accept valid content (portfolio sites may not mention name in all sections)
-            if source_type == "personal_site":
-                # Check if content looks like a valid portfolio/site (has text, links, etc)
-                has_content = len(content) > 500
-                has_structure = (
-                    ("http" in content.lower() or "#" in content or content.count("\n") > 5) and
-                    content.count(name_parts[0]) >= 0  # Don't strictly require name
-                )
-                
-                should_accept = has_content or has_structure
-                print(f"  -> Content check: length={len(content)}, has_structure={has_structure}")
-                
-                if should_accept:
-                    sources.append({"url": url, "content": content})
-                    print(f"  -> ADDED: {len(content)} chars (portfolio/site content)")
-                    
-                    # Extract photo URL
-                    if not identity.get("photo_url"):
-                        photo = re.search(
-                            r'https?://[^\s"\']+\.(?:jpg|jpeg|png|webp)',
-                            content
-                        )
-                        if photo:
-                            identity["photo_url"] = photo.group(0)
-                            print(f"  -> Photo found: {identity['photo_url'][:50]}")
-                    
-                    # Extract email
-                    if not identity.get("email"):
-                        email = re.search(
-                            r'\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b',
-                            content
-                        )
-                        if email:
-                            identity["email"] = email.group(0)
-                            print(f"  -> Email found: {identity['email']}")
-                else:
-                    print(f"  -> SKIPPED: Not enough valid content")
+            # Extract deep contact info from content
+            contact_info = self.extractor.extract_contact_info(content)
+            print(f"  -> Found contact info: {len(contact_info['emails'])} emails, {len(contact_info['links'])} links")
             
-            # LinkedIn, GitHub, Twitter, Instagram: verify identity
-            else:
-                combined = content.lower()
-                has_name = any(p in combined for p in name_parts)
-                print(f"  -> Name check: {has_name}")
-                
-                if has_name:
+            # TIER 3: Update extracted identifiers for linking
+            if contact_info["emails"]:
+                extracted_identifiers["email"] = contact_info["emails"][0]
+                extracted_identifiers["email_domain"] = contact_info["emails"][0].split("@")[1]
+            
+            if contact_info["social_handles"].get("github"):
+                extracted_identifiers["github_handle"] = contact_info["social_handles"]["github"][0]
+            
+            if contact_info["social_handles"].get("twitter"):
+                extracted_identifiers["twitter_handle"] = contact_info["social_handles"]["twitter"][0]
+            
+            # Verify content
+            combined = content.lower()
+            has_name = any(p in combined for p in name_parts)
+            
+            if source_type == "personal_site":
+                # Personal sites don't always mention name/company
+                if len(content) > 300:
                     sources.append({"url": url, "content": content})
-                    print(f"  -> ADDED: {len(content)} chars")
-                else:
-                    print(f"  -> SKIPPED: Name not found in {source_type} content")
+                    print(f"  -> ADDED: Personal website content ({len(content)} chars)")
+            elif has_name:
+                sources.append({"url": url, "content": content})
+                print(f"  -> ADDED: {source_type.upper()} content ({len(content)} chars)")
+            else:
+                print(f"  -> SKIPPED: Name not found in {source_type} content")
         
-        print(f"[SCRAPE_ALL DONE] Scraped {len(sources)} sources\n")
+        # TIER 3: DEEP LINKING - Cross-verify identity
+        print(f"\n[TIER 3] Performing deep linking analysis...")
+        linkage_result = self.linkage.link_identifiers(extracted_identifiers)
+        print(f"[DEEP LINK] Confidence: {linkage_result['confidence_score']:.2f}")
+        print(f"[DEEP LINK] Linked platforms: {linkage_result['linked_platforms']}")
         
-        # ENHANCEMENT: Search for and scrape recent posts/tweets from each platform for more depth
-        print(f"[POSTS SEARCH] Looking for recent posts from each platform...")
-        self._search_and_scrape_posts(identity, name, sources)
+        # Store linkage info in identity
+        identity["linkage"] = linkage_result
+        identity["extracted_identifiers"] = extracted_identifiers
+        
+        print(f"[TIER 2-3 DONE] Scraped {len(sources)} sources with deep linking\n")
+        
+        # TIER 1.5: Search for recent posts using already-found identifiers
+        print(f"[POSTS SEARCH] Looking for recent posts...")
+        handle = identity.get("handle") or extracted_identifiers.get("github_handle") or extracted_identifiers.get("twitter_handle")
+        if handle:
+            self._search_and_scrape_posts(identity, name, sources, handle)
         
         return sources
     
-    def _search_and_scrape_posts(self, identity: dict, name: str, sources: list) -> None:
+    def _search_and_scrape_posts(self, identity: dict, name: str, sources: list, handle: str) -> None:
         """Search for and scrape multiple recent posts from each platform"""
         
-        handle = identity.get("handle")
         if not handle:
             return
         
+        # Cache check
+        cache_key = f"posts_{handle}"
+        cached = self.request_cache.get(cache_key)
+        if cached:
+            sources.extend(cached)
+            return
+        
+        posts_found = []
+        
         # Search for recent LinkedIn posts
-        if handle:
-            print(f"[POSTS] Searching for recent LinkedIn posts by @{handle}...")
-            linkedin_posts = self.search.search(
-                f'site:linkedin.com/{handle} OR site:linkedin.com/in/{handle}',
-                count=3
-            )
-            for post in linkedin_posts[:2]:  # Get up to 2 more posts
-                if "linkedin.com" in post["url"] and post["url"] not in [s["url"] for s in sources]:
-                    content = self.jina.scrape(post["url"])
-                    if content and len(content) > 300:
-                        sources.append({"url": post["url"], "content": content})
-                        print(f"  [LINKEDIN POST] Added {len(content)} chars from {post['url'][:50]}")
+        print(f"[POSTS] Searching for recent posts by @{handle}...")
+        linkedin_posts = self.search.search(
+            f'site:linkedin.com/{handle}',
+            count=2
+        )
+        for post in linkedin_posts[:1]:
+            if "linkedin.com" in post["url"] and post["url"] not in [s["url"] for s in sources]:
+                # Use Jina (browser scraping slower for posts)
+                content = self.jina.scrape(post["url"])
+                if content and len(content) > 200:
+                    sources.append({"url": post["url"], "content": content})
+                    posts_found.append({"url": post["url"], "content": content})
+                    print(f"  ✓ LinkedIn post: {len(content)} chars")
         
-        # Search for recent Twitter/X posts  
-        if handle:
-            print(f"[POSTS] Searching for recent Twitter posts by @{handle}...")
-            twitter_posts = self.search.search(
-                f'site:x.com/{handle} OR site:twitter.com/{handle}',
-                count=3
-            )
-            for post in twitter_posts[:2]:  # Get up to 2 more posts
-                if ("x.com" in post["url"] or "twitter.com" in post["url"]) and post["url"] not in [s["url"] for s in sources]:
-                    content = self.jina.scrape(post["url"])
-                    if content and len(content) > 200:
-                        sources.append({"url": post["url"], "content": content})
-                        print(f"  [TWITTER POST] Added {len(content)} chars from {post['url'][:50]}")
+        # Search for recent Twitter posts  
+        twitter_posts = self.search.search(
+            f'site:x.com/{handle} OR site:twitter.com/{handle}',
+            count=2
+        )
+        for post in twitter_posts[:1]:
+            if ("x.com" in post["url"] or "twitter.com" in post["url"]) and post["url"] not in [s["url"] for s in sources]:
+                content = self.jina.scrape(post["url"])
+                if content and len(content) > 100:
+                    sources.append({"url": post["url"], "content": content})
+                    posts_found.append({"url": post["url"], "content": content})
+                    print(f"  ✓ Twitter post: {len(content)} chars")
         
-        # Search for recent Instagram posts
-        if handle:
-            print(f"[POSTS] Searching for recent Instagram posts by @{handle}...")
-            insta_posts = self.search.search(
-                f'site:instagram.com/{handle}',
-                count=2
-            )
-            for post in insta_posts[:1]:  # Get 1 more post
-                if "instagram.com" in post["url"] and post["url"] not in [s["url"] for s in sources]:
-                    content = self.jina.scrape(post["url"])
-                    if content and len(content) > 200:
-                        sources.append({"url": post["url"], "content": content})
-                        print(f"  [INSTAGRAM POST] Added {len(content)} chars from {post['url'][:50]}")
+        # Cache posts
+        if posts_found:
+            self.request_cache.set(cache_key, posts_found)
         
-        # Extract profile image if not found yet
+        # Extract photo if not found
         if not identity.get("photo_url"):
-            print(f"[PHOTO] Searching for profile image...")
             self._extract_profile_image(identity, name, handle)
     
     def _extract_profile_image(self, identity: dict, name: str, handle: str) -> None:
-        """Search for and extract profile image from various platforms"""
+        """Extract profile photo from official CDNs only"""
         
         if not handle:
             return
         
-        # Priority: LinkedIn > Twitter > Instagram > GitHub > Google Images
+        print(f"[PHOTO] Searching for profile image...")
         
-        # 1. Try LinkedIn profile picture
-        print(f"[PHOTO] Searching LinkedIn profile image...")
-        linkedin_results = self.search.search(
-            f'linkedin.com/in/{handle} profile picture OR photo',
-            count=2
-        )
-        for result in linkedin_results:
-            if "linkedin.com" in result["url"]:
-                # Scrape and look for image links
-                content = self.jina.scrape(result["url"])
-                if content:
-                    # Look for profile image URLs
-                    images = re.findall(r'(https://[^\s"\'<>]*?linkedin[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp))', content)
-                    if images:
-                        identity["photo_url"] = images[0]
-                        print(f"  [PHOTO FOUND] LinkedIn: {identity['photo_url'][:60]}")
-                        return
+        platforms = [
+            ("Twitter/X", ["pbs.twimg.com"]),
+            ("LinkedIn", ["media.licdn.com"]),
+            ("GitHub", ["avatars.githubusercontent.com"]),
+            ("Instagram", ["scontent"]),
+        ]
         
-        # 2. Try Twitter/X profile picture
-        if not identity.get("photo_url"):
-            print(f"[PHOTO] Searching X/Twitter profile image...")
-            twitter_results = self.search.search(
-                f'x.com/{handle} OR twitter.com/{handle}',
-                count=2
-            )
-            for result in twitter_results:
-                if "x.com" in result["url"] or "twitter.com" in result["url"]:
-                    content = self.jina.scrape(result["url"])
-                    if content:
-                        # Look for profile image URLs (pbs.twimg.com or similar)
-                        images = re.findall(r'(https://[^\s"\'<>]*?(?:pbs\.twimg|twitter|x\.com)[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp))', content)
-                        if images:
-                            identity["photo_url"] = images[0]
-                            print(f"  [PHOTO FOUND] Twitter: {identity['photo_url'][:60]}")
+        for platform_name, official_cdns in platforms:
+            if identity.get("photo_url"):
+                break
+            
+            for cdn in official_cdns:
+                if identity.get("photo_url"):
+                    break
+                
+                # Search for images from this CDN
+                search_query = f'site:{cdn} {handle}'
+                results = self.search.search(search_query, count=1)
+                
+                for result in results:
+                    # Extract image URLs
+                    cdn_pattern = cdn.replace(".", r"\.")
+                    images = re.findall(rf'(https://[^\s"\'<>]*?{cdn_pattern}[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp))', result.get("content", ""))
+                    
+                    for img in images:
+                        # Filter out logos/banners
+                        if not any(x in img.lower() for x in ['logo', 'banner', 'icon', 'cover']):
+                            identity["photo_url"] = img
+                            print(f"  ✓ Found photo from {platform_name}")
                             return
-        
-        # 3. Try Instagram profile picture
-        if not identity.get("photo_url"):
-            print(f"[PHOTO] Searching Instagram profile image...")
-            instagram_results = self.search.search(
-                f'instagram.com/{handle}',
-                count=1
-            )
-            for result in instagram_results:
-                if "instagram.com" in result["url"]:
-                    content = self.jina.scrape(result["url"])
-                    if content:
-                        # Look for profile image URLs
-                        images = re.findall(r'(https://[^\s"\'<>]*?instagram[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp))', content)
-                        if images:
-                            identity["photo_url"] = images[0]
-                            print(f"  [PHOTO FOUND] Instagram: {identity['photo_url'][:60]}")
-                            return
-        
-        # 4. Try GitHub profile picture
-        if not identity.get("photo_url"):
-            print(f"[PHOTO] Searching GitHub profile image...")
-            github_results = self.search.search(
-                f'github.com/{handle}',
-                count=1
-            )
-            for result in github_results:
-                if "github.com" in result["url"]:
-                    content = self.jina.scrape(result["url"])
-                    if content:
-                        # GitHub avatars follow pattern: avatars.githubusercontent.com
-                        images = re.findall(r'(https://[^\s"\'<>]*?avatars\.githubusercontent\.com[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp))', content)
-                        if images:
-                            identity["photo_url"] = images[0]
-                            print(f"  [PHOTO FOUND] GitHub: {identity['photo_url'][:60]}")
-                            return
-        
-        # 5. Generic image search for the person
-        if not identity.get("photo_url"):
-            print(f"[PHOTO] Generic search for {name} profile picture...")
-            generic_results = self.search.search(
-                f'"{name}" "{identity.get("handle", "")}" profile picture headshot',
-                count=2
-            )
-            for result in generic_results:
-                if "http" in result.get("url", ""):
-                    # Extract any image URLs from the search result
-                    images = re.findall(r'(https://[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp)\b)', result.get("content", ""))
-                    if images:
-                        identity["photo_url"] = images[0]
-                        print(f"  [PHOTO FOUND] Generic search: {identity['photo_url'][:60]}")
-                        return
-        
-        if not identity.get("photo_url"):
-            print(f"  [NO PHOTO FOUND] Could not extract profile image")
+
+
 

@@ -105,6 +105,10 @@ button:disabled { background: #888; cursor: default; }
 <script>
 let mdContent = '';
 let personName = '';
+let personRole = '';
+let personCompany = '';
+let personContext = '';
+let rejectedUrls = [];
 
 async function go() {
   const name = document.getElementById('inp-name').value.trim();
@@ -117,15 +121,54 @@ async function go() {
     return;
   }
   
+  rejectedUrls = [];
+  personName = name;
+  personRole = role;
+  personCompany = company;
+  personContext = ctx;
+  
   document.getElementById('form-wrap').style.display = 'none';
   document.getElementById('loader').style.display = 'block';
   document.getElementById('btn').disabled = true;
   
+  performResearch(name, role, company, ctx, []);
+}
+
+async function researchAgain() {
+  if (!personName) {
+    alert('No previous research found');
+    return;
+  }
+  
+  const resultDiv = document.getElementById('result');
+  let identity = {};
+  if (resultDiv.dataset.identity) {
+    try {
+      identity = JSON.parse(resultDiv.dataset.identity);
+    } catch(e) {
+      console.log('Could not parse identity');
+    }
+  }
+  
+  if (identity.linkedin_url) rejectedUrls.push(identity.linkedin_url);
+  if (identity.personal_site) rejectedUrls.push(identity.personal_site);
+  if (identity.github) rejectedUrls.push(identity.github);
+  if (identity.twitter) rejectedUrls.push(identity.twitter);
+  if (identity.instagram) rejectedUrls.push(identity.instagram);
+  
+  console.log('Researching again, rejecting', rejectedUrls.length, 'URLs');
+  resultDiv.style.display = 'none';
+  document.getElementById('loader').style.display = 'block';
+  
+  performResearch(personName, personRole, personCompany, personContext, rejectedUrls);
+}
+
+async function performResearch(name, role, company, ctx, rejected) {
   try {
     const res = await fetch('/research', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name, role, company, context: ctx})
+      body: JSON.stringify({name, role, company, context: ctx, rejected_urls: rejected})
     });
     
     const data = await res.json();
@@ -135,12 +178,12 @@ async function go() {
     }
     
     mdContent = data.markdown || '';
-    personName = name;
     renderBriefing(data);
     
   } catch(e) {
     document.getElementById('loader').style.display = 'none';
     document.getElementById('form-wrap').style.display = 'block';
+    document.getElementById('result').style.display = 'block';
     document.getElementById('btn').disabled = false;
     alert('Error: ' + e.message);
   }
@@ -193,7 +236,10 @@ function renderBriefing(d) {
     ? d.smart_questions.map((q,i) => `<li>${q}</li>`).join('')
     : `<li>${d.smart_questions}</li>`;
   
-  document.getElementById('result').innerHTML = `
+  const resultDiv = document.getElementById('result');
+  resultDiv.dataset.identity = JSON.stringify(identity);
+  
+  resultDiv.innerHTML = `
   <div class="briefing">
     <div class="profile-top">
       <div class="profile-info">
@@ -251,6 +297,7 @@ function renderBriefing(d) {
     
     <div class="actions">
       <button class="btn-outline" onclick="downloadMd()">Download Markdown</button>
+      <button class="btn-outline" onclick="researchAgain()">Wrong person? Research again</button>
       <button class="btn-outline" onclick="location.reload()">Research Someone Else</button>
     </div>
   </div>`;
@@ -291,6 +338,7 @@ def research():
         role = data.get('role', '').strip()
         company = data.get('company', '').strip()
         context = data.get('context', '').strip()
+        rejected_urls = data.get('rejected_urls', [])
         
         if not all([name, role, company, context]):
             return jsonify({"error": "All fields are required"}), 400
@@ -299,7 +347,7 @@ def research():
         print(f"[FLASK] Creating agent...")
         agent = IntelAgent()
         print(f"[FLASK] Agent created, calling research()...")
-        result = agent.research(name, role, company, context)
+        result = agent.research(name, role, company, context, rejected_urls)
         print(f"[FLASK] Research complete, building response...")
         
         # Build markdown for download
