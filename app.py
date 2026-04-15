@@ -399,6 +399,24 @@ def research():
             "",
             "---",
             "",
+            "## Digital Profiles",
+            "",
+        ]
+        
+        # Add discovered platforms
+        if result.get('linkedin_handle'):
+            md_lines.append(f"- **LinkedIn**: https://linkedin.com/in/{result['linkedin_handle']}")
+        if result.get('twitter_url'):
+            md_lines.append(f"- **Twitter/X**: {result['twitter_url']}")
+        if result.get('github_url'):
+            md_lines.append(f"- **GitHub**: {result['github_url']}")
+        if result.get('personal_site_url'):
+            md_lines.append(f"- **Personal Site**: {result['personal_site_url']}")
+        if result.get('instagram_url'):
+            md_lines.append(f"- **Instagram**: {result['instagram_url']}")
+        
+        md_lines += [
+            "",
             "## Sources",
             "",
         ]

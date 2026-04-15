@@ -173,27 +173,7 @@ class Researcher:
         if not linkedin_found:
             print(f"[WARNING] No LinkedIn found or identity verification failed")
         
-        return identity
-    
-    def _fuzzy_company_match(self, text: str, company: str) -> bool:
-        """Fuzzy match company names"""
-        # Direct match
-        if company in text:
-            return True
-        
-        # Common abbreviations
-        words = company.lower().split()
-        if all(w[:3] in text for w in words if len(w) >= 3):
-            return True
-        
-        # First word + "uni" for universities
-        if "university" in text and len(words) > 0:
-            if words[0] in text:
-                return True
-        
-        return False
-        
-        # If handle found, search for other platforms
+        # AFTER IDENTITY LOCKED: Search for other platforms
         if identity["handle"]:
             handle = identity["handle"]
             
@@ -246,6 +226,24 @@ class Researcher:
                     break
         
         return identity
+    
+    def _fuzzy_company_match(self, text: str, company: str) -> bool:
+        """Fuzzy match company names"""
+        # Direct match
+        if company in text:
+            return True
+        
+        # Common abbreviations
+        words = company.lower().split()
+        if all(w[:3] in text for w in words if len(w) >= 3):
+            return True
+        
+        # First word + "uni" for universities
+        if "university" in text and len(words) > 0:
+            if words[0] in text:
+                return True
+        
+        return False
     
     def scrape_all(self, identity: dict, name: str, company: str) -> list:
         """
@@ -369,19 +367,31 @@ class Researcher:
             if contact_info["social_handles"].get("twitter"):
                 extracted_identifiers["twitter_handle"] = contact_info["social_handles"]["twitter"][0]
             
-            # Verify and add source
-            combined = content.lower()
-            has_name = any(p in combined for p in name_parts)
-            
-            if source_type == "personal_site":
-                if len(content) > 300:
+            # Add source (trust verified identity URLs)
+            # If we already locked the identity, the URL is verified - add content regardless
+            if source_type in ["personal_site", "instagram"]:
+                # Personal sites and Instagram need minimum content
+                if len(content) > 100:  # Lower threshold (was 300)
                     sources.append({"url": url, "content": content})
-                    print(f"  -> ADDED: Personal website content ({len(content)} chars)")
-            elif has_name:
-                sources.append({"url": url, "content": content})
-                print(f"  -> ADDED: {source_type.upper()} content ({len(content)} chars)")
+                    print(f"  -> ADDED: {source_type.upper()} content ({len(content)} chars)")
+                else:
+                    print(f"  -> SKIPPED: {source_type} content too short ({len(content)} chars)")
+            elif source_type in ["github", "twitter"]:
+                # GitHub and Twitter are identity-verified by URL - add without name check
+                if len(content) > 50:  # Just need any content
+                    sources.append({"url": url, "content": content})
+                    print(f"  -> ADDED: {source_type.upper()} content ({len(content)} chars)")
+                else:
+                    print(f"  -> SKIPPED: {source_type} content too minimal ({len(content)} chars)")
             else:
-                print(f"  -> SKIPPED: Name not found in {source_type} content")
+                # LinkedIn and other sources - check name match
+                combined = content.lower()
+                has_name = any(p in combined for p in name_parts)
+                if has_name:
+                    sources.append({"url": url, "content": content})
+                    print(f"  -> ADDED: {source_type.upper()} content ({len(content)} chars)")
+                else:
+                    print(f"  -> SKIPPED: Name not found in {source_type} content")
         
         # TIER 3: DEEP LINKING
         print(f"\n[TIER 3] Performing deep linking analysis...")
