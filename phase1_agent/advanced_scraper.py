@@ -135,7 +135,7 @@ class IdentityLinkage:
 
 
 class LinkedInBrowserScraper:
-    """Scrape LinkedIn using browser automation (Playwright)"""
+    """Scrape LinkedIn using browser automation (Playwright) with Jina fallback"""
     
     def __init__(self):
         self.browser = None
@@ -143,52 +143,97 @@ class LinkedInBrowserScraper:
     
     def scrape_profile(self, url: str, timeout: int = 15) -> Optional[str]:
         """
-        Scrape LinkedIn profile using Playwright (sync wrapper)
+        Scrape LinkedIn profile using Playwright (sync wrapper) with Jina fallback
         Returns: Profile content or None if unavailable
         """
+        # Try browser scraping first
+        text = self._browser_scrape(url, timeout)
+        if text:
+            return text
+        
+        # Fallback to Jina
+        print(f"[LINKEDIN] Browser scraping failed, trying Jina fallback...")
+        return self._jina_fallback(url)
+    
+    def _browser_scrape(self, url: str, timeout: int) -> Optional[str]:
+        """Try browser scraping with multiple strategies"""
         try:
             from playwright.sync_api import sync_playwright
         except ImportError:
             print("[LINKEDIN] Playwright not installed")
             return None
         
+        strategies = [
+            ("networkidle", "networkidle"),
+            ("domcontentloaded", None),
+            ("load", None)
+        ]
+        
+        for wait_strategy, load_state in strategies:
+            try:
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(
+                        headless=True,
+                        args=['--disable-blink-features=AutomationControlled']
+                    )
+                    
+                    context = browser.new_context(
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        viewport={"width": 1920, "height": 1080}
+                    )
+                    
+                    page = context.new_page()
+                    
+                    try:
+                        print(f"[LINKEDIN BROWSER] Strategy: {wait_strategy}")
+                        page.goto(url, wait_until=wait_strategy, timeout=timeout * 1000)
+                        
+                        if load_state:
+                            page.wait_for_load_state(load_state, timeout=5000)
+                        
+                        # Extract text content
+                        text = page.evaluate("() => document.body.innerText")
+                        
+                        browser.close()
+                        
+                        if text and len(text) > 100:
+                            print(f"[LINKEDIN BROWSER SUCCESS] {wait_strategy}: Got {len(text)} chars")
+                            return text
+                        
+                    except Exception as e:
+                        print(f"[LINKEDIN BROWSER] {wait_strategy} failed: {str(e)[:50]}")
+                        browser.close()
+                        continue
+            
+            except Exception as e:
+                print(f"[LINKEDIN BROWSER INIT] Error: {str(e)[:50]}")
+                continue
+        
+        print(f"[LINKEDIN BROWSER] All strategies failed")
+        return None
+    
+    def _jina_fallback(self, url: str) -> Optional[str]:
+        """Fallback to Jina for reading LinkedIn profile"""
         try:
-            with sync_playwright() as p:
-                # Launch browser with anti-detection
-                browser = p.chromium.launch(
-                    headless=True,
-                    args=['--disable-blink-features=AutomationControlled']
-                )
-                
-                # Create context with user agent
-                context = browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                )
-                
-                page = context.new_page()
-                
-                try:
-                    print(f"[LINKEDIN BROWSER] Opening: {url[:60]}")
-                    page.goto(url, wait_until="networkidle", timeout=timeout * 1000)
-                    
-                    # Wait for content to load
-                    page.wait_for_load_state("networkidle")
-                    
-                    # Extract text content
-                    text = page.evaluate("() => document.body.innerText")
-                    
-                    browser.close()
-                    
-                    print(f"[LINKEDIN BROWSER SUCCESS] Got {len(text)} chars")
-                    return text if len(text) > 100 else None
-                
-                except Exception as e:
-                    print(f"[LINKEDIN BROWSER ERROR] {str(e)[:80]}")
-                    browser.close()
-                    return None
+            jina_url = f"https://r.jina.ai/{url}"
+            response = requests.get(
+                jina_url,
+                headers={
+                    "Accept": "text/markdown",
+                    "User-Agent": "Mozilla/5.0"
+                },
+                timeout=20
+            )
+            
+            if response.status_code == 200 and len(response.text) > 300:
+                print(f"[JINA FALLBACK] Success: {len(response.text)} chars")
+                return response.text[:4000]
+            else:
+                print(f"[JINA FALLBACK] Failed: {response.status_code}")
+                return None
         
         except Exception as e:
-            print(f"[LINKEDIN BROWSER INIT ERROR] {str(e)[:80]}")
+            print(f"[JINA FALLBACK] Error: {str(e)[:50]}")
             return None
 
 
