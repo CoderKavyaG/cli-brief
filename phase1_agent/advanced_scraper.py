@@ -334,3 +334,83 @@ class DeepProfileExtractor:
         info["social_handles"]["github"] = re.findall(r'github\.com/([a-zA-Z0-9_-]+)', content)
         
         return info
+
+
+class LinkExtractor:
+    """Extract and rank URLs from post content"""
+    
+    def extract_links_from_posts(self, posts: list) -> Dict[str, Dict]:
+        """
+        Extract links from post content with rankings.
+        
+        Input: [{url: str, content: str}, ...]
+        Output: {
+            "twitter": {"urls": ["x.com/user1", ...], "count": 3, "confidence": 0.9},
+            "github": {"urls": ["github.com/user1", ...], "count": 2, "confidence": 0.8},
+            ...
+        }
+        """
+        link_map = {}
+        platform_patterns = {
+            "twitter": [r'((?:https?://)?(?:twitter\.com|x\.com)/[a-zA-Z0-9_]+)'],
+            "github": [r'((?:https?://)?github\.com/[a-zA-Z0-9_-]+)'],
+            "personal": [r'(https?://(?!(?:linkedin|twitter|x|github|instagram|facebook)\.com)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})'],
+            "linkedin": [r'((?:https?://)?linkedin\.com/in/[a-zA-Z0-9_-]+)'],
+            "instagram": [r'((?:https?://)?instagram\.com/[a-zA-Z0-9_.-]+)'],
+        }
+        
+        all_links = {}
+        
+        # Extract links from all posts
+        for post in posts:
+            content = post.get("content", "")
+            if not content:
+                continue
+            
+            for platform, patterns in platform_patterns.items():
+                for pattern in patterns:
+                    matches = re.findall(pattern, content, re.IGNORECASE)
+                    
+                    for match in matches:
+                        # Normalize URL
+                        url = match.lower()
+                        if not url.startswith("http"):
+                            url = "https://" + url
+                        
+                        if url not in all_links:
+                            all_links[url] = {
+                                "platform": platform,
+                                "count": 0,
+                                "posts": []
+                            }
+                        
+                        all_links[url]["count"] += 1
+                        all_links[url]["posts"].append(post.get("url", ""))
+        
+        # Group by platform and rank by frequency
+        for url, data in all_links.items():
+            platform = data["platform"]
+            
+            if platform not in link_map:
+                link_map[platform] = {
+                    "urls": [],
+                    "count": 0,
+                    "confidence": 0.0
+                }
+            
+            link_map[platform]["urls"].append(url)
+            link_map[platform]["count"] += data["count"]
+        
+        # Calculate confidence scores
+        for platform, data in link_map.items():
+            if data["count"] >= 2:
+                data["confidence"] = 0.9  # Multiple mentions = high confidence
+            elif data["count"] == 1:
+                data["confidence"] = 0.6  # Single mention = medium confidence
+            else:
+                data["confidence"] = 0.3
+            
+            # Deduplicate URLs
+            data["urls"] = list(set(data["urls"]))
+        
+        return link_map if link_map else {}
