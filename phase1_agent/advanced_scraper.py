@@ -4,8 +4,22 @@ Advanced scraper with browser automation for LinkedIn + deep content extraction
 
 import requests
 import re
+import asyncio
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
+from playwright.sync_api import sync_playwright
+
+try:
+    import pyppeteer
+    PYPPETEER_AVAILABLE = True
+except ImportError:
+    PYPPETEER_AVAILABLE = False
+
+try:
+    from jina import Jina
+    JINA_AVAILABLE = True
+except ImportError:
+    JINA_AVAILABLE = False
 
 
 class IdentityLinkage:
@@ -133,7 +147,7 @@ class IdentityLinkage:
 
 
 class LinkedInBrowserScraper:
-    """Scrape LinkedIn using browser automation (Playwright) with Jina fallback"""
+    """Scrape LinkedIn using browser automation (Puppeteer >> Playwright >> Jina)"""
     
     def __init__(self):
         self.browser = None
@@ -141,17 +155,120 @@ class LinkedInBrowserScraper:
     
     def scrape_profile(self, url: str, timeout: int = 15) -> Optional[str]:
         """
-        Scrape LinkedIn profile using Playwright (sync wrapper) with Jina fallback
+        Scrape LinkedIn profile with multi-tier approach:
+        1. Try Puppeteer (pyppeteer) - best for LinkedIn (less detection)
+        2. Try Playwright fallback - second option
+        3. Try Jina - final fallback
         Returns: Profile content or None if unavailable
         """
-        # Try browser scraping first
+        # TIER 1: Try Puppeteer first (less likely to be blocked)
+        text = self._puppeteer_scrape(url, timeout)
+        if text:
+            return text
+        
+        print(f"[LINKEDIN] Puppeteer failed, trying Playwright...")
+        # TIER 2: Try Playwright backup
         text = self._browser_scrape(url, timeout)
         if text:
             return text
         
-        # Fallback to Jina
+        # TIER 3: Fallback to Jina
         print(f"[LINKEDIN] Browser scraping failed, trying Jina fallback...")
         return self._jina_fallback(url)
+    
+    def _puppeteer_scrape(self, url: str, timeout: int) -> Optional[str]:
+        """
+        Scrape using Puppeteer (pyppeteer) - better avoiding LinkedIn detection
+        Returns: Profile content or None if unavailable
+        """
+        if not PYPPETEER_AVAILABLE:
+            return None
+        
+        try:
+            # Run async code in sync context
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(self._async_puppeteer_scrape(url, timeout))
+            loop.close()
+            return result
+        except Exception as e:
+            print(f"[LINKEDIN PUPPETEER] Error: {str(e)[:80]}")
+            return None
+    
+    async def _async_puppeteer_scrape(self, url: str, timeout: int) -> Optional[str]:
+        """Async Puppeteer scraping - multiple user agents and strategies"""
+        try:
+            browser = None
+            try:
+                browser = await pyppeteer.launch(
+                    headless=True,
+                    args=[
+                        '--disable-blink-features=AutomationControlled',
+                        '--disable-web-resources',
+                        '--no-first-run'
+                    ]
+                )
+                
+                page = await browser.newPage()
+                
+                # Set realistic user agent
+                user_agents = [
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                ]
+                import random
+                await page.setUserAgent(random.choice(user_agents))
+                
+                # Viewport and other settings
+                await page.setViewport({'width': 1920, 'height': 1080})
+                
+                try:
+                    print(f"[LINKEDIN PUPPETEER] Navigating to: {url[:50]}...")
+                    await page.goto(url, {'waitUntil': 'networkidle2', 'timeout': timeout * 1000})
+                    
+                    # Extract content
+                    content = await page.evaluate('() => document.body.innerText')
+                    
+                    if content and len(content) > 100:
+                        print(f"[LINKEDIN PUPPETEER SUCCESS] Got {len(content)} chars")
+                        await page.close()
+                        await browser.close()
+                        return content
+                    
+                    await page.close()
+                except asyncio.TimeoutError:
+                    print(f"[LINKEDIN PUPPETEER] Timeout - trying with waitUntil lo...")
+                    try:
+                        await page.waitForNavigation({'waitUntil': 'load', 'timeout': 5000})
+                    except:
+                        pass
+                    
+                    content = await page.evaluate('() => document.body.innerText')
+                    
+                    if content and len(content) > 100:
+                        print(f"[LINKEDIN PUPPETEER FALLBACK] Got {len(content)} chars")
+                        await page.close()
+                        await browser.close()
+                        return content
+                    
+                    await page.close()
+                except Exception as e:
+                    print(f"[LINKEDIN PUPPETEER NAV] Error: {str(e)[:80]}")
+                    await page.close()
+            
+            finally:
+                if browser:
+                    try:
+                        await browser.close()
+                    except:
+                        pass
+        
+        except Exception as e:
+            print(f"[LINKEDIN PUPPETEER FATAL] {str(e)[:80]}")
+            return None
+        
+        return None
     
     def _browser_scrape(self, url: str, timeout: int) -> Optional[str]:
         """Try browser scraping with multiple strategies"""
