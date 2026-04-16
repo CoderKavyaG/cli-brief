@@ -453,6 +453,10 @@ class Researcher:
                 except Exception as e:
                     print(f"  ✗ Twitter post failed: {str(e)[:40]}")
         
+        # Extract profile image if not found
+        if not identity.get("photo_url"):
+            self._extract_profile_image(identity, name, handle)
+        
         # Cache posts for 5 minutes
         if posts_found:
             self.request_cache.set(cache_key, posts_found)

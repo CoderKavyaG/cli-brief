@@ -361,6 +361,35 @@ def research():
             f"",
             "---",
             "",
+            "## Connect",
+            "",
+        ]
+        
+        # Add profile image if available
+        if result.get('photo_url'):
+            md_lines.append(f"![Profile Photo]({result['photo_url']})")
+            md_lines.append("")
+        
+        # Add social links
+        links = []
+        if result.get('linkedin_handle'):
+            links.append(f"[LinkedIn](https://linkedin.com/in/{result['linkedin_handle']})")
+        if result.get('twitter_url'):
+            links.append(f"[Twitter/X]({result['twitter_url']})")
+        if result.get('github_url'):
+            links.append(f"[GitHub]({result['github_url']})")
+        if result.get('personal_site_url'):
+            links.append(f"[Personal Site]({result['personal_site_url']})")
+        if result.get('instagram_url'):
+            links.append(f"[Instagram]({result['instagram_url']})")
+        
+        if links:
+            md_lines.append(" | ".join(links))
+            md_lines += ["", ""]
+        
+        md_lines += [
+            "---",
+            "",
             "## Who They Are",
             "",
             result['who_they_are'],
@@ -398,24 +427,6 @@ def research():
             result['icebreaker'],
             "",
             "---",
-            "",
-            "## Digital Profiles",
-            "",
-        ]
-        
-        # Add discovered platforms
-        if result.get('linkedin_handle'):
-            md_lines.append(f"- **LinkedIn**: https://linkedin.com/in/{result['linkedin_handle']}")
-        if result.get('twitter_url'):
-            md_lines.append(f"- **Twitter/X**: {result['twitter_url']}")
-        if result.get('github_url'):
-            md_lines.append(f"- **GitHub**: {result['github_url']}")
-        if result.get('personal_site_url'):
-            md_lines.append(f"- **Personal Site**: {result['personal_site_url']}")
-        if result.get('instagram_url'):
-            md_lines.append(f"- **Instagram**: {result['instagram_url']}")
-        
-        md_lines += [
             "",
             "## Sources",
             "",
