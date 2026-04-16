@@ -10,6 +10,7 @@ from .advanced_scraper import (
     IdentityLinkage, LinkedInBrowserScraper, RequestCache, 
     DeepProfileExtractor, LinkExtractor
 )
+from .email_finder import EmailFinder
 
 
 class Researcher:
@@ -23,6 +24,7 @@ class Researcher:
         self.browser_scraper = LinkedInBrowserScraper()
         self.request_cache = RequestCache(ttl_minutes=5)
         self.extractor = DeepProfileExtractor()
+        self.email_finder = EmailFinder()
         self.link_extractor = LinkExtractor()
     
     def find_person(self, name: str, company: str, role: str, rejected_urls: list = None) -> dict:
@@ -404,6 +406,17 @@ class Researcher:
         
         print(f"[TIER 2-3 DONE] Scraped {len(sources)} sources with deep linking\n")
         
+        # EMAIL FINDING: Try to discover email address
+        print(f"[EMAIL FINDER] Starting email discovery...")
+        email_result = self._find_email(name, company, identity)
+        if email_result["email"]:
+            identity["email"] = email_result["email"]
+            identity["email_source"] = email_result["source"]
+            identity["email_variants"] = email_result["variants"]
+            print(f"[EMAIL] Found: {email_result['email']} ({email_result['source']})")
+        else:
+            print(f"[EMAIL] No email found")
+        
         return sources
     
     def _search_and_scrape_posts(self, identity: dict, name: str) -> list:
@@ -502,6 +515,43 @@ class Researcher:
                             identity["photo_url"] = img
                             print(f"  ✓ Found photo from {platform_name}")
                             return
+    
+    def _find_email(self, name: str, company: str, identity: dict) -> dict:
+        """Find email using EmailFinder with domain fallback"""
+        
+        # Strategy 1: Check if already extracted from content
+        if identity.get("email"):
+            return {
+                "email": identity["email"],
+                "source": "extracted",
+                "variants": [],
+                "confidence": 0.7
+            }
+        
+        # Strategy 2: Extract domain from LinkedIn if available
+        domain = None
+        if identity.get("linkedin_url"):
+            # Try to extract company domain from LinkedIn search or scrape
+            # For now, use email finder's company-to-domain lookup
+            domain = self.email_finder.find_domain_from_company(company)
+        
+        # Strategy 3: Use Hunter.io if we have domain
+        if domain:
+            email_result = self.email_finder.find_email(name, company, domain)
+            if email_result["email"]:
+                return email_result
+        
+        # Strategy 4: Try without domain (Hunter will attempt to find domain)
+        email_result = self.email_finder.find_email(name, company)
+        if email_result["email"]:
+            return email_result
+        
+        return {
+            "email": None,
+            "source": "none",
+            "variants": [],
+            "confidence": 0.0
+        }
 
 
 
