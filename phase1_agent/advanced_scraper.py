@@ -1,9 +1,7 @@
 """
-Advanced scraper with browser automation for LinkedIn + async parallel scraping
+Advanced scraper with browser automation for LinkedIn + deep content extraction
 """
 
-import asyncio
-import aiohttp
 import requests
 import re
 from typing import Dict, List, Optional, Tuple
