@@ -192,7 +192,9 @@ class Researcher:
             identity["company_domain"] = None
             skip = ["linkedin", "twitter", "github", "instagram", "facebook", 
                    "youtube", "help.", "support.", "docs.", "medium.com", "reddit"]
-            skip_domains = ["slideshare", "about.me", "beacons", "taplink", "carrd", "wix"]
+            skip_domains = ["slideshare", "about.me", "beacons", "taplink", "carrd", "wix",
+                           "slidingscale", "gravatar", "resume.com", "minteractive", "resumepace",
+                           "scribd", "pinterest", "issuu"]
             
             name_lower = name.lower()
             for query in site_queries:
