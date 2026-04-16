@@ -192,9 +192,13 @@ class Researcher:
             identity["company_domain"] = None
             skip = ["linkedin", "twitter", "github", "instagram", "facebook", 
                    "youtube", "help.", "support.", "docs.", "medium.com", "reddit"]
+            # Skip institutional/aggregator/portfolio sites - these are NOT personal websites
             skip_domains = ["slideshare", "about.me", "beacons", "taplink", "carrd", "wix",
                            "slidingscale", "gravatar", "resume.com", "minteractive", "resumepace",
-                           "scribd", "pinterest", "issuu"]
+                           "scribd", "pinterest", "issuu", 
+                           # Institutional and talent/portfolio aggregators
+                           "lshtm.ac.uk", "hercampus", "university", "college", "school",
+                           "talentrack", "talent", "profile", "portfolio"]
             
             name_lower = name.lower()
             for query in site_queries:
@@ -613,20 +617,17 @@ class Researcher:
     
     def _find_email(self, name: str, company: str, identity: dict) -> dict:
         """
-        Complete email finding chain with four fallback levels:
-        1. Extracted from platform content (highest confidence)
-        2. Company domain → Hunter.io API
-        3. Extracted company domain → Pattern generation
-        4. Generic patterns (lowest confidence)
+        ONLY extract email from verified scraped content.
+        DO NOT guess patterns or use Hunter API - email MUST be explicitly found in content.
         """
         
         print(f"[EMAIL] Finding email for {name}...")
         
-        # PRIORITY 1: Extracted from content during scraping
+        # ONLY: Extract from content if found
         extracted_identifiers = identity.get("extracted_identifiers", {})
         if extracted_identifiers.get("email"):
             email = extracted_identifiers["email"]
-            print(f"[EMAIL] [P1] FOUND from content: {email}")
+            print(f"[EMAIL] ✓ VERIFIED from content: {email}")
             return {
                 "email": email,
                 "source": "extracted_from_content",
@@ -635,39 +636,7 @@ class Researcher:
                 "finder_method": "content_extraction"
             }
         
-        print(f"[EMAIL] [P1] No email in content")
-        
-        # PRIORITY 2: Company domain lookup + Hunter API
-        print(f"[EMAIL] [P2] Trying company domain for '{company}'...")
-        domain = self.email_finder.find_domain_from_company(company)
-        
-        if domain:
-            print(f"[EMAIL] [P2] Found domain: {domain}")
-            email_result = self.email_finder.find_email(name, company, domain)
-            if email_result and email_result.get("email"):
-                print(f"[EMAIL] [P2] FOUND: {email_result['email']}")
-                return email_result
-        
-        # PRIORITY 3: Use extracted company domain from search
-        extracted_domain = identity.get("company_domain")
-        if extracted_domain and extracted_domain != domain:
-            print(f"[EMAIL] [P3] Using extracted domain: {extracted_domain}")
-            email_result = self.email_finder.find_email(name, company, extracted_domain)
-            if email_result and email_result.get("email"):
-                print(f"[EMAIL] [P3] FOUND: {email_result['email']}")
-                return email_result
-        
-        # PRIORITY 4: Final patterns
-        print(f"[EMAIL] [P4] Trying pattern generation...")
-        domains_to_try = [d for d in {extracted_domain, domain} if d]
-        
-        for try_domain in domains_to_try:
-            email_result = self.email_finder.find_email(name, company, try_domain)
-            if email_result and email_result.get("email"):
-                print(f"[EMAIL] [P4] FOUND: {email_result['email']}")
-                return email_result
-        
-        print(f"[EMAIL] All attempts failed")
+        print(f"[EMAIL] ✗ Could not verify from content - NOT reporting email")
         return {
             "email": None,
             "source": "none",
