@@ -179,20 +179,54 @@ class Researcher:
         if identity["handle"]:
             handle = identity["handle"]
             
-            # Personal site
+            # Personal site - search specifically for portfolio/personal sites
             print(f"[SEARCH] Personal site for {name}")
-            site_results = self.search.search(
-                f'"{name}" site OR portfolio -linkedin -twitter -github -instagram',
-                count=3
-            )
-            print(f"[PERSONAL SITE] Got {len(site_results)} results")
+            # Try multiple search variations
+            site_queries = [
+                f'"{handle}" portfolio',  # Their handle + portfolio
+                f'"{handle}" personal site',
+                f'"{name}" "{handle}" site',  # Both name and handle
+            ]
+            
+            identity["personal_site"] = None
             skip = ["linkedin.com", "twitter.com", "x.com", "github.com",
-                   "instagram.com", "facebook.com", "youtube.com"]
-            for r in site_results:
-                if not any(s in r["url"] for s in skip):
+                   "instagram.com", "facebook.com", "youtube.com", "medium.com",
+                   "reddit.com", "news", "article"]
+            skip_domains = ["slideshare", "about.me", "beacons.ai", "bio.fm",
+                           "taplink", "carrd", "notion"]
+            
+            for query in site_queries:
+                site_results = self.search.search(query, count=5)
+                print(f"[PERSONAL SITE] Query '{query}' got {len(site_results)} results")
+                
+                for j, r in enumerate(site_results):
+                    url_lower = r["url"].lower()
+                    domain_lower = url_lower.split("/")[2].replace("www.", "")
+                    title_lower = r.get("title", "").lower()
+                    
+                    print(f"  [{j+1}] {url_lower[:70]}")
+                    print(f"      Title: {title_lower[:60]}")
+                    print(f"      Skip checks: ", end="")
+                    
+                    # Skip known non-personal sites
+                    if any(s in url_lower for s in skip):
+                        print(f"SKIP (matches: {[s for s in skip if s in url_lower]})")
+                        continue
+                    if any(s in domain_lower for s in skip_domains):
+                        print(f"SKIP (domain: {[s for s in skip_domains if s in domain_lower]})")
+                        continue
+                    
+                    print(f"ACCEPT")
+                    # Looks valid - use it
                     identity["personal_site"] = r["url"]
                     print(f"[FOUND] Personal site: {r['url']}")
                     break
+                
+                if identity["personal_site"]:
+                    break
+            
+            if not identity["personal_site"]:
+                print(f"[PERSONAL SITE] No valid personal site found")
             
             # Instagram
             print(f"[SEARCH] Instagram for @{handle}")
@@ -215,17 +249,31 @@ class Researcher:
                         print(f"[FOUND] GitHub: {r['url']}")
                         break
             
-            # Twitter
+            # Twitter - get PROFILE URL, not tweet URLs
             print(f"[SEARCH] Twitter for @{handle}")
             tw_results = self.search.search(
-                f'twitter.com/{handle} OR x.com/{handle}', count=2
+                f'twitter.com/{handle} OR x.com/{handle}', count=3
             )
-            for r in tw_results:
-                if f"twitter.com/{handle}" in r["url"].lower() or \
-                   f"x.com/{handle}" in r["url"].lower():
-                    identity["twitter"] = r["url"]
-                    print(f"[FOUND] Twitter: {r['url']}")
-                    break
+            print(f"[TWITTER DEBUG] Got {len(tw_results)} results")
+            for i, r in enumerate(tw_results):
+                url_lower = r["url"].lower()
+                print(f"[TWITTER DEBUG] Result {i+1}: {url_lower[:80]}")
+                print(f"  Has /status/: {'/status/' in url_lower}")
+                print(f"  Has twitter.com/{handle}: {'twitter.com/' + handle in url_lower}")
+                print(f"  Has x.com/{handle}: {'x.com/' + handle in url_lower}")
+                
+                # Only accept profile URLs, NOT tweet/status URLs
+                if "/status/" not in url_lower and "/web/" not in url_lower:
+                    if (f"twitter.com/{handle}" in url_lower or \
+                        f"x.com/{handle}" in url_lower):
+                        identity["twitter"] = r["url"]
+                        print(f"[FOUND] Twitter: {r['url']}")
+                        break
+                else:
+                    print(f"[TWITTER DEBUG] Skipped (has /status/ or /web/)")
+            
+            if not identity.get("twitter"):
+                print(f"[TWITTER DEBUG] No profile URL found, may only have tweets")
         
         return identity
     
@@ -300,10 +348,10 @@ class Researcher:
                     "content": content,
                     "status": "success" if content else "empty"
                 }
-                print(f"  ✓ Got {len(content) if content else 0} chars")
+                print(f"  [OK] Got {len(content) if content else 0} chars")
                 
             except Exception as e:
-                print(f"  ✗ Error: {str(e)[:60]}")
+                print(f"  [ERROR] {str(e)[:60]}")
                 scrape_results[source_type] = {
                     "url": url,
                     "content": "",
@@ -417,6 +465,36 @@ class Researcher:
         else:
             print(f"[EMAIL] No email found")
         
+        # PROPAGATE EXTRACTED IDENTIFIERS BACK TO IDENTITY DICT
+        # So app.py can return them in the response
+        print(f"[EXTRACTION] Propagating extracted identifiers to identity dict...")
+        if extracted_identifiers.get("github_handle"):
+            # Build full GitHub URL if only handle is available
+            gh_input = extracted_identifiers["github_handle"]
+            if gh_input.startswith("http"):
+                identity["github"] = gh_input
+            else:
+                identity["github"] = f"https://github.com/{gh_input}"
+            print(f"[EXTRACTION] GitHub: {identity['github']}")
+        
+        if extracted_identifiers.get("twitter_handle"):
+            # Build full Twitter URL if only handle is available
+            tw_input = extracted_identifiers["twitter_handle"]
+            if tw_input.startswith("http"):
+                identity["twitter"] = tw_input
+            else:
+                identity["twitter"] = f"https://x.com/{tw_input}"
+            print(f"[EXTRACTION] Twitter: {identity['twitter']}")
+        
+        if extracted_identifiers.get("instagram_handle"):
+            # Build full Instagram URL if only handle is available
+            ig_input = extracted_identifiers["instagram_handle"]
+            if ig_input.startswith("http"):
+                identity["instagram"] = ig_input
+            else:
+                identity["instagram"] = f"https://www.instagram.com/{ig_input}/"
+            print(f"[EXTRACTION] Instagram: {identity['instagram']}")
+        
         return sources
     
     def _search_and_scrape_posts(self, identity: dict, name: str) -> list:
@@ -517,50 +595,51 @@ class Researcher:
                             return
     
     def _find_email(self, name: str, company: str, identity: dict) -> dict:
-        """Find email using EmailFinder with domain fallback"""
+        """
+        Find email with priority: 
+        1. Use already extracted from content
+        2. Hunter.io API (if enabled)
+        3. Pattern generation
+        """
         
-        print(f"[_find_email] Called for {name} @ {company}")
+        print(f"[EMAIL] Finding email for {name}...")
         
-        # Strategy 1: Check if already extracted from content
-        if identity.get("email"):
-            print(f"[_find_email] Email already in identity: {identity['email']}")
+        # PRIORITY 1: Check if extracted from ANY platform content during scraping
+        extracted_identifiers = identity.get("extracted_identifiers", {})
+        if extracted_identifiers.get("email"):
+            email = extracted_identifiers["email"]
+            print(f"[EMAIL] ✓ Using extracted from content: {email}")
             return {
-                "email": identity["email"],
-                "source": "extracted",
+                "email": email,
+                "source": "extracted_from_content",
                 "variants": [],
-                "confidence": 0.7
+                "confidence": 0.95,
+                "finder_method": "content_extraction"
             }
         
-        # Strategy 2: Extract domain from LinkedIn if available
-        domain = None
-        if identity.get("linkedin_url"):
-            print(f"[_find_email] Found LinkedIn URL, looking up domain...")
-            domain = self.email_finder.find_domain_from_company(company)
-            print(f"[_find_email] Domain lookup result: {domain}")
+        # PRIORITY 2: Try with patterns/Hunter
+        domain = self.email_finder.find_domain_from_company(company)
         
-        # Strategy 3: Use Hunter.io if we have domain
         if domain:
-            print(f"[_find_email] Trying email finder with domain {domain}...")
+            print(f"[EMAIL] Domain lookup: {domain}")
             email_result = self.email_finder.find_email(name, company, domain)
-            print(f"[_find_email] Email finder result: {email_result['email']}")
-            if email_result["email"]:
-                print(f"[_find_email] SUCCESS: Found {email_result['email']}")
+            if email_result.get("email"):
+                print(f"[EMAIL] ✓ Found via fallback: {email_result['email']}")
+                return email_result
+        else:
+            print(f"[EMAIL] Unknown domain, trying without...")
+            email_result = self.email_finder.find_email(name, company)
+            if email_result.get("email"):
+                print(f"[EMAIL] ✓ Found via fallback: {email_result['email']}")
                 return email_result
         
-        # Strategy 4: Try without domain (Hunter will attempt to find domain)
-        print(f"[_find_email] Trying email finder without domain...")
-        email_result = self.email_finder.find_email(name, company)
-        print(f"[_find_email] Result: {email_result['email']}")
-        if email_result["email"]:
-            print(f"[_find_email] SUCCESS: Found {email_result['email']}")
-            return email_result
-        
-        print(f"[_find_email] FAILED: No email found")
+        print(f"[EMAIL] No email found")
         return {
             "email": None,
             "source": "none",
             "variants": [],
-            "confidence": 0.0
+            "confidence": 0.0,
+            "finder_method": "none"
         }
 
 

@@ -1,6 +1,7 @@
 """
-Email Finder: Proactive email discovery using Hunter.io API + scrape fallback
-Finds contact emails for people using their name, company, and domain
+Email Finder: Extract emails from scraped platform content
+Primary: LinkedIn, personal sites, GitHub, Twitter, Instagram
+Fallback: Hunter.io API (optional), then pattern generation
 """
 
 import os
@@ -10,32 +11,71 @@ from typing import Optional, Dict, List
 
 
 class EmailFinder:
-    """Find emails using Hunter.io API with local fallback extraction"""
+    """Extract emails from scraped content with Hunter.io API as optional fallback"""
     
     def __init__(self):
         self.hunter_api_key = os.getenv("HUNTER_API_KEY")
         self.hunter_enabled = bool(self.hunter_api_key)
         
         if self.hunter_enabled:
-            print("[EMAIL FINDER] Hunter.io API enabled")
+            print("[EMAIL FINDER] Hunter.io API enabled (will use if extraction fails)")
         else:
-            print("[EMAIL FINDER] Hunter.io API not configured - using fallback extraction only")
+            print("[EMAIL FINDER] Hunter.io not configured - using platform extraction + patterns")
+    
+    def find_email_from_extracted(self, extracted_emails: List[str]) -> Dict[str, any]:
+        """
+        Use emails already extracted from scraped content (PRIMARY METHOD).
+        
+        Args:
+            extracted_emails: List of emails found by regex in scraped content
+        
+        Returns:
+            {
+                "email": first_valid_email or None,
+                "source": "extracted_from_content",
+                "confidence": 0.95,
+                "variants": [all_extracted_emails]
+            }
+        """
+        if not extracted_emails:
+            return None
+        
+        # Filter spam/noreply addresses
+        filtered = [e for e in extracted_emails if not any(
+            x in e.lower() for x in ['noreply', 'support', 'info@', 'contact@', 
+                                     'hello@', 'no-reply', 'donotreply', 'notification']
+        )]
+        
+        if filtered:
+            email = filtered[0]  # Take first (usually most relevant)
+            print(f"[EMAIL] ✓ Extracted from platform content: {email}")
+            
+            return {
+                "email": email,
+                "source": "extracted_from_content",
+                "confidence": 0.95,  # High confidence - it's real
+                "variants": filtered,
+                "finder_method": "content_extraction"
+            }
+        
+        return None
     
     def find_email(self, name: str, company: str, domain: Optional[str] = None) -> Dict[str, any]:
         """
-        Find email for a person using multiple strategies.
+        Fallback: Find email using pattern generation or Hunter.io.
+        Only called if extraction from content found nothing.
         
         Args:
             name: Person's full name
             company: Company name  
-            domain: Company domain (e.g. "google.com"). If not provided, will search for it.
+            domain: Company domain (e.g. "google.com")
         
         Returns:
             {
                 "email": "john@google.com" or None,
-                "source": "hunter" | "extracted" | "none",
+                "source": "hunter" | "pattern" | "none",
                 "confidence": 0.0-1.0,
-                "variants": ["j.smith@company.com", ...] (alternative formats)
+                "variants": [alternatives]
             }
         """
         result = {
@@ -46,14 +86,16 @@ class EmailFinder:
             "finder_method": "none"
         }
         
-        # STRATEGY 1: Hunter.io API (most reliable)
+        # FALLBACK 1: Hunter.io API (if enabled)
         if self.hunter_enabled and domain:
+            print("[EMAIL] Trying Hunter.io API...")
             hunter_result = self._hunter_find(name, domain)
             if hunter_result:
                 return hunter_result
         
-        # STRATEGY 2: Common email patterns (fallback)
+        # FALLBACK 2: Common email patterns
         if domain:
+            print("[EMAIL] Generating common email patterns...")
             pattern_result = self._try_common_patterns(name, domain)
             if pattern_result:
                 return pattern_result
