@@ -519,8 +519,11 @@ class Researcher:
     def _find_email(self, name: str, company: str, identity: dict) -> dict:
         """Find email using EmailFinder with domain fallback"""
         
+        print(f"[_find_email] Called for {name} @ {company}")
+        
         # Strategy 1: Check if already extracted from content
         if identity.get("email"):
+            print(f"[_find_email] Email already in identity: {identity['email']}")
             return {
                 "email": identity["email"],
                 "source": "extracted",
@@ -531,21 +534,28 @@ class Researcher:
         # Strategy 2: Extract domain from LinkedIn if available
         domain = None
         if identity.get("linkedin_url"):
-            # Try to extract company domain from LinkedIn search or scrape
-            # For now, use email finder's company-to-domain lookup
+            print(f"[_find_email] Found LinkedIn URL, looking up domain...")
             domain = self.email_finder.find_domain_from_company(company)
+            print(f"[_find_email] Domain lookup result: {domain}")
         
         # Strategy 3: Use Hunter.io if we have domain
         if domain:
+            print(f"[_find_email] Trying email finder with domain {domain}...")
             email_result = self.email_finder.find_email(name, company, domain)
+            print(f"[_find_email] Email finder result: {email_result['email']}")
             if email_result["email"]:
+                print(f"[_find_email] SUCCESS: Found {email_result['email']}")
                 return email_result
         
         # Strategy 4: Try without domain (Hunter will attempt to find domain)
+        print(f"[_find_email] Trying email finder without domain...")
         email_result = self.email_finder.find_email(name, company)
+        print(f"[_find_email] Result: {email_result['email']}")
         if email_result["email"]:
+            print(f"[_find_email] SUCCESS: Found {email_result['email']}")
             return email_result
         
+        print(f"[_find_email] FAILED: No email found")
         return {
             "email": None,
             "source": "none",
