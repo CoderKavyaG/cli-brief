@@ -356,6 +356,13 @@ def research():
         result = agent.research(name, role, company, context, rejected_urls)
         print(f"[FLASK] Research complete, building response...")
         
+        # DEBUG: Print what agent returned
+        print(f"[DEBUG] Agent result email: {result.get('email')}")
+        print(f"[DEBUG] Agent result personal_site_url: {result.get('personal_site_url')}")
+        print(f"[DEBUG] Agent result twitter_url: {result.get('twitter_url')}")
+        print(f"[DEBUG] Agent result identity.email: {result.get('identity', {}).get('email')}")
+        print(f"[DEBUG] Agent result identity.personal_site: {result.get('identity', {}).get('personal_site')}")
+        
         # Build markdown for download
         md_lines = [
             f"# {result['name']}",

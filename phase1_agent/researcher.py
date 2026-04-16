@@ -179,48 +179,50 @@ class Researcher:
         if identity["handle"]:
             handle = identity["handle"]
             
-            # Personal site - search specifically for portfolio/personal sites
-            print(f"[SEARCH] Personal site for {name}")
-            # Try multiple search variations
+            # Personal site - search with HANDLE FIRST (more unique + validate)
+            print(f"[SEARCH] Personal site for {name} (@{handle})")
+            # Prioritize handle - more unique and specific than full name
             site_queries = [
-                f'"{handle}" portfolio',  # Their handle + portfolio
-                f'"{handle}" personal site',
-                f'"{name}" "{handle}" site',  # Both name and handle
+                f'{handle} portfolio OR site OR about',
+                f'{handle} -linkedin -github -twitter',
+                f'"{name}" portfolio -linkedin',
             ]
             
             identity["personal_site"] = None
-            skip = ["linkedin.com", "twitter.com", "x.com", "github.com",
-                   "instagram.com", "facebook.com", "youtube.com", "medium.com",
-                   "reddit.com", "news", "article"]
-            skip_domains = ["slideshare", "about.me", "beacons.ai", "bio.fm",
-                           "taplink", "carrd", "notion"]
+            identity["company_domain"] = None
+            skip = ["linkedin", "twitter", "github", "instagram", "facebook", 
+                   "youtube", "help.", "support.", "docs.", "medium.com", "reddit"]
+            skip_domains = ["slideshare", "about.me", "beacons", "taplink", "carrd", "wix"]
             
+            name_lower = name.lower()
             for query in site_queries:
                 site_results = self.search.search(query, count=5)
-                print(f"[PERSONAL SITE] Query '{query}' got {len(site_results)} results")
+                print(f"[PERSONAL SITE] Searching: {query} ({len(site_results)} results)")
                 
-                for j, r in enumerate(site_results):
+                for r in site_results:
                     url_lower = r["url"].lower()
                     domain_lower = url_lower.split("/")[2].replace("www.", "")
                     title_lower = r.get("title", "").lower()
+                    content_lower = r.get("content", "").lower()[:500]
                     
-                    print(f"  [{j+1}] {url_lower[:70]}")
-                    print(f"      Title: {title_lower[:60]}")
-                    print(f"      Skip checks: ", end="")
-                    
-                    # Skip known non-personal sites
+                    # Skip blacklist
                     if any(s in url_lower for s in skip):
-                        print(f"SKIP (matches: {[s for s in skip if s in url_lower]})")
                         continue
                     if any(s in domain_lower for s in skip_domains):
-                        print(f"SKIP (domain: {[s for s in skip_domains if s in domain_lower]})")
                         continue
                     
-                    print(f"ACCEPT")
-                    # Looks valid - use it
-                    identity["personal_site"] = r["url"]
-                    print(f"[FOUND] Personal site: {r['url']}")
-                    break
+                    # VALIDATE: Content must mention the person
+                    mentions = (handle in url_lower or handle in title_lower or 
+                               handle in content_lower or name_lower in title_lower)
+                    
+                    # Extract company domain if visible
+                    if company.lower() in domain_lower:
+                        identity["company_domain"] = domain_lower
+                    
+                    if mentions:
+                        print(f"[FOUND] {url_lower[:60]} (mentions person)")
+                        identity["personal_site"] = r["url"]
+                        break
                 
                 if identity["personal_site"]:
                     break
@@ -311,6 +313,7 @@ class Researcher:
         print(f"[IDENTITY] GitHub: {identity.get('github', 'NONE')}")
         print(f"[IDENTITY] Twitter: {identity.get('twitter', 'NONE')}")
         print(f"[IDENTITY] Instagram: {identity.get('instagram', 'NONE')}")
+        print(f"[IDENTITY] Company Domain: {identity.get('company_domain', 'NONE')}")
         
         # BUILD SCRAPING TASKS - Start with known URLs
         scrape_tasks = []
@@ -386,6 +389,7 @@ class Researcher:
         # PROCESS INITIAL SCRAPE RESULTS
         name_parts = name.lower().split()
         company_lower = company.lower()
+        handle = identity.get("handle", "").lower()
         extracted_identifiers = {
             "linkedin_handle": identity.get("handle"),
             "email": identity.get("email")
@@ -402,9 +406,20 @@ class Researcher:
                 print(f"  -> SKIPPED: {status}")
                 continue
             
+            # VALIDATION: For non-LinkedIn sources, verify person is mentioned
+            content_lower = content.lower()
+            if source_type != "linkedin":
+                has_person = (handle in content_lower or 
+                             any(p in content_lower for p in name_parts if len(p) > 3) or
+                             company_lower in content_lower)
+                
+                if not has_person:
+                    print(f"  -> VALIDATION FAILED: Person not mentioned in {source_type}")
+                    continue
+            
             # Extract deep contact info from content
             contact_info = self.extractor.extract_contact_info(content)
-            print(f"  -> Found contact info: {len(contact_info['emails'])} emails, {len(contact_info['links'])} links")
+            print(f"  -> VALIDATED: Found {len(contact_info['emails'])} emails")
             
             # Update extracted identifiers
             if contact_info["emails"]:
@@ -596,19 +611,20 @@ class Researcher:
     
     def _find_email(self, name: str, company: str, identity: dict) -> dict:
         """
-        Find email with priority: 
-        1. Use already extracted from content
-        2. Hunter.io API (if enabled)
-        3. Pattern generation
+        Complete email finding chain with four fallback levels:
+        1. Extracted from platform content (highest confidence)
+        2. Company domain → Hunter.io API
+        3. Extracted company domain → Pattern generation
+        4. Generic patterns (lowest confidence)
         """
         
         print(f"[EMAIL] Finding email for {name}...")
         
-        # PRIORITY 1: Check if extracted from ANY platform content during scraping
+        # PRIORITY 1: Extracted from content during scraping
         extracted_identifiers = identity.get("extracted_identifiers", {})
         if extracted_identifiers.get("email"):
             email = extracted_identifiers["email"]
-            print(f"[EMAIL] ✓ Using extracted from content: {email}")
+            print(f"[EMAIL] [P1] FOUND from content: {email}")
             return {
                 "email": email,
                 "source": "extracted_from_content",
@@ -617,23 +633,39 @@ class Researcher:
                 "finder_method": "content_extraction"
             }
         
-        # PRIORITY 2: Try with patterns/Hunter
+        print(f"[EMAIL] [P1] No email in content")
+        
+        # PRIORITY 2: Company domain lookup + Hunter API
+        print(f"[EMAIL] [P2] Trying company domain for '{company}'...")
         domain = self.email_finder.find_domain_from_company(company)
         
         if domain:
-            print(f"[EMAIL] Domain lookup: {domain}")
+            print(f"[EMAIL] [P2] Found domain: {domain}")
             email_result = self.email_finder.find_email(name, company, domain)
-            if email_result.get("email"):
-                print(f"[EMAIL] ✓ Found via fallback: {email_result['email']}")
-                return email_result
-        else:
-            print(f"[EMAIL] Unknown domain, trying without...")
-            email_result = self.email_finder.find_email(name, company)
-            if email_result.get("email"):
-                print(f"[EMAIL] ✓ Found via fallback: {email_result['email']}")
+            if email_result and email_result.get("email"):
+                print(f"[EMAIL] [P2] FOUND: {email_result['email']}")
                 return email_result
         
-        print(f"[EMAIL] No email found")
+        # PRIORITY 3: Use extracted company domain from search
+        extracted_domain = identity.get("company_domain")
+        if extracted_domain and extracted_domain != domain:
+            print(f"[EMAIL] [P3] Using extracted domain: {extracted_domain}")
+            email_result = self.email_finder.find_email(name, company, extracted_domain)
+            if email_result and email_result.get("email"):
+                print(f"[EMAIL] [P3] FOUND: {email_result['email']}")
+                return email_result
+        
+        # PRIORITY 4: Final patterns
+        print(f"[EMAIL] [P4] Trying pattern generation...")
+        domains_to_try = [d for d in {extracted_domain, domain} if d]
+        
+        for try_domain in domains_to_try:
+            email_result = self.email_finder.find_email(name, company, try_domain)
+            if email_result and email_result.get("email"):
+                print(f"[EMAIL] [P4] FOUND: {email_result['email']}")
+                return email_result
+        
+        print(f"[EMAIL] All attempts failed")
         return {
             "email": None,
             "source": "none",

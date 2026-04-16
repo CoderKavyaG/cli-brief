@@ -221,10 +221,9 @@ class EmailFinder:
     
     def find_domain_from_company(self, company: str) -> Optional[str]:
         """
-        Try to find company domain from company name.
-        Note: This is a fallback - better to have domain from LinkedIn scrape
+        Find company domain with expanded list and smart heuristics
         """
-        # Common patterns
+        # Expanded company-to-domain mapping
         domain_map = {
             "google": "google.com",
             "microsoft": "microsoft.com",
@@ -235,10 +234,19 @@ class EmailFinder:
             "netflix": "netflix.com",
             "tesla": "tesla.com",
             "twitter": "twitter.com",
+            "x": "x.com",
             "linkedin": "linkedin.com",
             "ibm": "ibm.com",
             "oracle": "oracle.com",
             "salesforce": "salesforce.com",
+            "adobe": "adobe.com",
+            "slack": "slack.com",
+            "github": "github.com",
+            "stripe": "stripe.com",
+            "uber": "uber.com",
+            "airbnb": "airbnb.com",
+            "inthebox": "inthebox.co",
+            "chitkara": "chitkara.edu.in",
         }
         
         company_lower = company.lower()
@@ -251,5 +259,18 @@ class EmailFinder:
         for company_key, domain in domain_map.items():
             if company_key in company_lower:
                 return domain
+        
+        # Smart heuristic for unknown companies
+        clean = company_lower.split()[0]
+        
+        if "university" in company_lower or "institute" in company_lower:
+            # Educational institution
+            if "india" in company_lower:
+                return f"{clean}.edu.in"
+            return f"{clean}.edu"
+        
+        # Generic attempt
+        if len(clean) > 3:
+            return f"{clean}.com"
         
         return None
