@@ -577,43 +577,30 @@ class Researcher:
         return posts_found
     
     def _extract_profile_image(self, identity: dict, name: str, handle: str) -> None:
-        """Extract profile photo from official CDNs only"""
+        """Try to extract profile photo - optional, doesn't block research"""
         
         if not handle:
             return
         
-        print(f"[PHOTO] Searching for profile image...")
-        
-        platforms = [
-            ("Twitter/X", ["pbs.twimg.com"]),
-            ("LinkedIn", ["media.licdn.com"]),
-            ("GitHub", ["avatars.githubusercontent.com"]),
-            ("Instagram", ["scontent"]),
-        ]
-        
-        for platform_name, official_cdns in platforms:
-            if identity.get("photo_url"):
-                break
+        try:
+            # Quick attempt: try LinkedIn media search only (minimal API usage)
+            print(f"[PHOTO] Attempting to fetch profile image...")
+            results = self.search.search(f'site:media.licdn.com {handle}', count=1)
             
-            for cdn in official_cdns:
-                if identity.get("photo_url"):
-                    break
+            if results and results[0].get("content"):
+                content = results[0]["content"]
+                # Look for image URL pattern
+                images = re.findall(r'(https://[^\s"\'<>]*?media\.licdn\.com[^\s"\'<>]*?\.jpg)', content)
                 
-                # Search for images from this CDN
-                search_query = f'site:{cdn} {handle}'
-                results = self.search.search(search_query, count=1)
-                
-                for result in results:
-                    # Extract image URLs
-                    cdn_pattern = cdn.replace(".", r"\.")
-                    images = re.findall(rf'(https://[^\s"\'<>]*?{cdn_pattern}[^\s"\'<>]*?\.(?:jpg|jpeg|png|webp))', result.get("content", ""))
-                    
-                    for img in images:
-                        # Filter out logos/banners
-                        if not any(x in img.lower() for x in ['logo', 'banner', 'icon', 'cover']):
-                            identity["photo_url"] = img
-                            print(f"  ✓ Found photo from {platform_name}")
-                            return
+                if images:
+                    identity["photo_url"] = images[0]
+                    print(f"  ✓ Found photo from LinkedIn")
+                    return
+            
+            print(f"  [SKIP] No profile photo available")
+        except Exception as e:
+            # Image extraction is optional - don't fail research if it fails
+            print(f"  [SKIP] Photo extraction error (non-critical): {str(e)[:40]}")
     
     def _find_email(self, name: str, company: str, identity: dict) -> dict:
         """
