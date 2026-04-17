@@ -62,6 +62,8 @@ button:disabled { background: #888; cursor: default; }
 .connect-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .link-btn { display: inline-flex; align-items: center; padding: 6px 12px; background: #f5f5f5; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; text-decoration: none; color: #2563eb; transition: background 0.2s; }
 .link-btn:hover { background: #f0f0f0; }
+.email-box { padding: 8px 12px; background: #fffbeb; border: 1px solid #fbbf24; border-radius: 6px; font-size: 13px; margin-bottom: 10px; }
+.email-box code { background: #fff; padding: 2px 4px; border-radius: 3px; font-family: monospace; }
 .icebreaker-box { background: #fffbeb; border-left: 3px solid #f59e0b; padding: 12px 14px; border-radius: 0 6px 6px 0; font-size: 15px; line-height: 1.6; color: #333; }
 .actions { display: flex; gap: 10px; margin-top: 24px; }
 .btn-outline { flex: 1; padding: 10px; border: 1px solid #ddd; background: white; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; color: #333; transition: background 0.2s; }
@@ -204,6 +206,13 @@ function renderBriefing(d) {
     : '';
   
   let connectHtml = '';
+  
+  // Email - most actionable, show at top
+  const email = d.email || identity.email;
+  if (email) {
+    connectHtml += `<div class="email-box"><strong>Email:</strong> <code>${email}</code></div>`;
+  }
+  
   if (identity.linkedin_url) {
     const handle = identity.handle || d.linkedin_handle || 'Profile';
     connectHtml += `<a href="${identity.linkedin_url}" target="_blank" class="link-btn">LinkedIn @${handle}</a>`;
@@ -223,9 +232,6 @@ function renderBriefing(d) {
   if (identity.personal_site) {
     const site = identity.personal_site.replace(/https?:\\/\\/www\\./, '').replace(/\\/$/, '');
     connectHtml += `<a href="${identity.personal_site}" target="_blank" class="link-btn">Website →</a>`;
-  }
-  if (identity.email) {
-    connectHtml += `<span class="link-btn"><strong>${identity.email}</strong></span>`;
   }
   
   const careItems = Array.isArray(d.what_they_care_about) 
@@ -350,6 +356,13 @@ def research():
         result = agent.research(name, role, company, context, rejected_urls)
         print(f"[FLASK] Research complete, building response...")
         
+        # DEBUG: Print what agent returned
+        print(f"[DEBUG] Agent result email: {result.get('email')}")
+        print(f"[DEBUG] Agent result personal_site_url: {result.get('personal_site_url')}")
+        print(f"[DEBUG] Agent result twitter_url: {result.get('twitter_url')}")
+        print(f"[DEBUG] Agent result identity.email: {result.get('identity', {}).get('email')}")
+        print(f"[DEBUG] Agent result identity.personal_site: {result.get('identity', {}).get('personal_site')}")
+        
         # Build markdown for download
         md_lines = [
             f"# {result['name']}",
@@ -359,6 +372,42 @@ def research():
             f"*Meeting context: {result['context']}*",
             f"*Generated: {result['timestamp']}*",
             f"",
+            "---",
+            "",
+            "## Connect",
+            "",
+        ]
+        
+        # Add profile image if available
+        if result.get('photo_url'):
+            md_lines.append(f"![Profile Photo]({result['photo_url']})")
+            md_lines.append("")
+        
+        # Add email if found
+        if result.get('email'):
+            md_lines.append(f"**Email:** `{result['email']}`")
+            if result.get('email_source'):
+                md_lines.append(f"*(discovered via {result['email_source']})*")
+            md_lines.append("")
+        
+        # Add social links
+        links = []
+        if result.get('linkedin_handle'):
+            links.append(f"[LinkedIn](https://linkedin.com/in/{result['linkedin_handle']})")
+        if result.get('twitter_url'):
+            links.append(f"[Twitter/X]({result['twitter_url']})")
+        if result.get('github_url'):
+            links.append(f"[GitHub]({result['github_url']})")
+        if result.get('personal_site_url'):
+            links.append(f"[Personal Site]({result['personal_site_url']})")
+        if result.get('instagram_url'):
+            links.append(f"[Instagram]({result['instagram_url']})")
+        
+        if links:
+            md_lines.append(" | ".join(links))
+            md_lines += ["", ""]
+        
+        md_lines += [
             "---",
             "",
             "## Who They Are",

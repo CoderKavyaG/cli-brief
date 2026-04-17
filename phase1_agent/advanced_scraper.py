@@ -1,13 +1,25 @@
 """
-Advanced scraper with browser automation for LinkedIn + async parallel scraping
+Advanced scraper with browser automation for LinkedIn + deep content extraction
 """
 
-import asyncio
-import aiohttp
 import requests
 import re
+import asyncio
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
+from playwright.sync_api import sync_playwright
+
+try:
+    import pyppeteer
+    PYPPETEER_AVAILABLE = True
+except ImportError:
+    PYPPETEER_AVAILABLE = False
+
+try:
+    from jina import Jina
+    JINA_AVAILABLE = True
+except ImportError:
+    JINA_AVAILABLE = False
 
 
 class IdentityLinkage:
@@ -135,7 +147,7 @@ class IdentityLinkage:
 
 
 class LinkedInBrowserScraper:
-    """Scrape LinkedIn using browser automation (Playwright)"""
+    """Scrape LinkedIn using browser automation (Puppeteer >> Playwright >> Jina)"""
     
     def __init__(self):
         self.browser = None
@@ -143,52 +155,200 @@ class LinkedInBrowserScraper:
     
     def scrape_profile(self, url: str, timeout: int = 15) -> Optional[str]:
         """
-        Scrape LinkedIn profile using Playwright (sync wrapper)
+        Scrape LinkedIn profile with multi-tier approach:
+        1. Try Puppeteer (pyppeteer) - best for LinkedIn (less detection)
+        2. Try Playwright fallback - second option
+        3. Try Jina - final fallback
         Returns: Profile content or None if unavailable
         """
+        # TIER 1: Try Puppeteer first (less likely to be blocked)
+        text = self._puppeteer_scrape(url, timeout)
+        if text:
+            return text
+        
+        print(f"[LINKEDIN] Puppeteer failed, trying Playwright...")
+        # TIER 2: Try Playwright backup
+        text = self._browser_scrape(url, timeout)
+        if text:
+            return text
+        
+        # TIER 3: Fallback to Jina
+        print(f"[LINKEDIN] Browser scraping failed, trying Jina fallback...")
+        return self._jina_fallback(url)
+    
+    def _puppeteer_scrape(self, url: str, timeout: int) -> Optional[str]:
+        """
+        Scrape using Puppeteer (pyppeteer) - better avoiding LinkedIn detection
+        Returns: Profile content or None if unavailable
+        """
+        if not PYPPETEER_AVAILABLE:
+            return None
+        
+        try:
+            # Run async code in sync context
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(self._async_puppeteer_scrape(url, timeout))
+            loop.close()
+            return result
+        except Exception as e:
+            print(f"[LINKEDIN PUPPETEER] Error: {str(e)[:80]}")
+            return None
+    
+    async def _async_puppeteer_scrape(self, url: str, timeout: int) -> Optional[str]:
+        """Async Puppeteer scraping - multiple user agents and strategies"""
+        try:
+            browser = None
+            try:
+                browser = await pyppeteer.launch(
+                    headless=True,
+                    args=[
+                        '--disable-blink-features=AutomationControlled',
+                        '--disable-web-resources',
+                        '--no-first-run'
+                    ]
+                )
+                
+                page = await browser.newPage()
+                
+                # Set realistic user agent
+                user_agents = [
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                ]
+                import random
+                await page.setUserAgent(random.choice(user_agents))
+                
+                # Viewport and other settings
+                await page.setViewport({'width': 1920, 'height': 1080})
+                
+                try:
+                    print(f"[LINKEDIN PUPPETEER] Navigating to: {url[:50]}...")
+                    await page.goto(url, {'waitUntil': 'networkidle2', 'timeout': timeout * 1000})
+                    
+                    # Extract content
+                    content = await page.evaluate('() => document.body.innerText')
+                    
+                    if content and len(content) > 100:
+                        print(f"[LINKEDIN PUPPETEER SUCCESS] Got {len(content)} chars")
+                        await page.close()
+                        await browser.close()
+                        return content
+                    
+                    await page.close()
+                except asyncio.TimeoutError:
+                    print(f"[LINKEDIN PUPPETEER] Timeout - trying with waitUntil lo...")
+                    try:
+                        await page.waitForNavigation({'waitUntil': 'load', 'timeout': 5000})
+                    except:
+                        pass
+                    
+                    content = await page.evaluate('() => document.body.innerText')
+                    
+                    if content and len(content) > 100:
+                        print(f"[LINKEDIN PUPPETEER FALLBACK] Got {len(content)} chars")
+                        await page.close()
+                        await browser.close()
+                        return content
+                    
+                    await page.close()
+                except Exception as e:
+                    print(f"[LINKEDIN PUPPETEER NAV] Error: {str(e)[:80]}")
+                    await page.close()
+            
+            finally:
+                if browser:
+                    try:
+                        await browser.close()
+                    except:
+                        pass
+        
+        except Exception as e:
+            print(f"[LINKEDIN PUPPETEER FATAL] {str(e)[:80]}")
+            return None
+        
+        return None
+    
+    def _browser_scrape(self, url: str, timeout: int) -> Optional[str]:
+        """Try browser scraping with multiple strategies"""
         try:
             from playwright.sync_api import sync_playwright
         except ImportError:
             print("[LINKEDIN] Playwright not installed")
             return None
         
+        strategies = [
+            ("networkidle", "networkidle"),
+            ("domcontentloaded", None),
+            ("load", None)
+        ]
+        
+        for wait_strategy, load_state in strategies:
+            try:
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(
+                        headless=True,
+                        args=['--disable-blink-features=AutomationControlled']
+                    )
+                    
+                    context = browser.new_context(
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        viewport={"width": 1920, "height": 1080}
+                    )
+                    
+                    page = context.new_page()
+                    
+                    try:
+                        print(f"[LINKEDIN BROWSER] Strategy: {wait_strategy}")
+                        page.goto(url, wait_until=wait_strategy, timeout=timeout * 1000)
+                        
+                        if load_state:
+                            page.wait_for_load_state(load_state, timeout=5000)
+                        
+                        # Extract text content
+                        text = page.evaluate("() => document.body.innerText")
+                        
+                        browser.close()
+                        
+                        if text and len(text) > 100:
+                            print(f"[LINKEDIN BROWSER SUCCESS] {wait_strategy}: Got {len(text)} chars")
+                            return text
+                        
+                    except Exception as e:
+                        print(f"[LINKEDIN BROWSER] {wait_strategy} failed: {str(e)[:50]}")
+                        browser.close()
+                        continue
+            
+            except Exception as e:
+                print(f"[LINKEDIN BROWSER INIT] Error: {str(e)[:50]}")
+                continue
+        
+        print(f"[LINKEDIN BROWSER] All strategies failed")
+        return None
+    
+    def _jina_fallback(self, url: str) -> Optional[str]:
+        """Fallback to Jina for reading LinkedIn profile"""
         try:
-            with sync_playwright() as p:
-                # Launch browser with anti-detection
-                browser = p.chromium.launch(
-                    headless=True,
-                    args=['--disable-blink-features=AutomationControlled']
-                )
-                
-                # Create context with user agent
-                context = browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                )
-                
-                page = context.new_page()
-                
-                try:
-                    print(f"[LINKEDIN BROWSER] Opening: {url[:60]}")
-                    page.goto(url, wait_until="networkidle", timeout=timeout * 1000)
-                    
-                    # Wait for content to load
-                    page.wait_for_load_state("networkidle")
-                    
-                    # Extract text content
-                    text = page.evaluate("() => document.body.innerText")
-                    
-                    browser.close()
-                    
-                    print(f"[LINKEDIN BROWSER SUCCESS] Got {len(text)} chars")
-                    return text if len(text) > 100 else None
-                
-                except Exception as e:
-                    print(f"[LINKEDIN BROWSER ERROR] {str(e)[:80]}")
-                    browser.close()
-                    return None
+            jina_url = f"https://r.jina.ai/{url}"
+            response = requests.get(
+                jina_url,
+                headers={
+                    "Accept": "text/markdown",
+                    "User-Agent": "Mozilla/5.0"
+                },
+                timeout=20
+            )
+            
+            if response.status_code == 200 and len(response.text) > 300:
+                print(f"[JINA FALLBACK] Success: {len(response.text)} chars")
+                return response.text[:4000]
+            else:
+                print(f"[JINA FALLBACK] Failed: {response.status_code}")
+                return None
         
         except Exception as e:
-            print(f"[LINKEDIN BROWSER INIT ERROR] {str(e)[:80]}")
+            print(f"[JINA FALLBACK] Error: {str(e)[:50]}")
             return None
 
 
@@ -220,81 +380,6 @@ class RequestCache:
         expired = [k for k, (_, ts) in self.cache.items() if now - ts > self.ttl]
         for k in expired:
             del self.cache[k]
-
-
-class ParallelScraper:
-    """Parallel async scraping of multiple URLs"""
-    
-    def __init__(self, max_concurrent: int = 3):
-        self.max_concurrent = max_concurrent
-        self.semaphore = asyncio.Semaphore(max_concurrent)
-    
-    async def scrape_multiple(self, urls: List[Tuple[str, str, callable]]) -> Dict[str, Dict]:
-        """
-        Scrape multiple URLs in parallel
-        
-        Args:
-            urls: List of (source_type, url, scraper_func)
-        
-        Returns:
-            {
-                "source_type": {
-                    "url": "...",
-                    "content": "...",
-                    "status": "success|failed",
-                    "time_ms": 123
-                }
-            }
-        """
-        tasks = [
-            self._scrape_one(source_type, url, scraper_func)
-            for source_type, url, scraper_func in urls
-        ]
-        
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        return {
-            r["source_type"]: {
-                "url": r["url"],
-                "content": r.get("content", ""),
-                "status": r["status"],
-                "time_ms": r.get("time_ms", 0)
-            }
-            for r in results if isinstance(r, dict)
-        }
-    
-    async def _scrape_one(self, source_type: str, url: str, scraper_func: callable) -> Dict:
-        """Scrape single URL with semaphore"""
-        async with self.semaphore:
-            start = datetime.now()
-            
-            try:
-                if asyncio.iscoroutinefunction(scraper_func):
-                    content = await scraper_func(url)
-                else:
-                    content = scraper_func(url)
-                
-                elapsed = (datetime.now() - start).total_seconds() * 1000
-                
-                return {
-                    "source_type": source_type,
-                    "url": url,
-                    "content": content,
-                    "status": "success" if content else "empty",
-                    "time_ms": int(elapsed)
-                }
-            
-            except Exception as e:
-                elapsed = (datetime.now() - start).total_seconds() * 1000
-                print(f"[PARALLEL SCRAPE ERROR] {source_type} {url[:50]}: {str(e)[:50]}")
-                
-                return {
-                    "source_type": source_type,
-                    "url": url,
-                    "status": "failed",
-                    "error": str(e),
-                    "time_ms": int(elapsed)
-                }
 
 
 class DeepProfileExtractor:
@@ -334,3 +419,83 @@ class DeepProfileExtractor:
         info["social_handles"]["github"] = re.findall(r'github\.com/([a-zA-Z0-9_-]+)', content)
         
         return info
+
+
+class LinkExtractor:
+    """Extract and rank URLs from post content"""
+    
+    def extract_links_from_posts(self, posts: list) -> Dict[str, Dict]:
+        """
+        Extract links from post content with rankings.
+        
+        Input: [{url: str, content: str}, ...]
+        Output: {
+            "twitter": {"urls": ["x.com/user1", ...], "count": 3, "confidence": 0.9},
+            "github": {"urls": ["github.com/user1", ...], "count": 2, "confidence": 0.8},
+            ...
+        }
+        """
+        link_map = {}
+        platform_patterns = {
+            "twitter": [r'((?:https?://)?(?:twitter\.com|x\.com)/[a-zA-Z0-9_]+)'],
+            "github": [r'((?:https?://)?github\.com/[a-zA-Z0-9_-]+)'],
+            "personal": [r'(https?://(?!(?:linkedin|twitter|x|github|instagram|facebook)\.com)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})'],
+            "linkedin": [r'((?:https?://)?linkedin\.com/in/[a-zA-Z0-9_-]+)'],
+            "instagram": [r'((?:https?://)?instagram\.com/[a-zA-Z0-9_.-]+)'],
+        }
+        
+        all_links = {}
+        
+        # Extract links from all posts
+        for post in posts:
+            content = post.get("content", "")
+            if not content:
+                continue
+            
+            for platform, patterns in platform_patterns.items():
+                for pattern in patterns:
+                    matches = re.findall(pattern, content, re.IGNORECASE)
+                    
+                    for match in matches:
+                        # Normalize URL
+                        url = match.lower()
+                        if not url.startswith("http"):
+                            url = "https://" + url
+                        
+                        if url not in all_links:
+                            all_links[url] = {
+                                "platform": platform,
+                                "count": 0,
+                                "posts": []
+                            }
+                        
+                        all_links[url]["count"] += 1
+                        all_links[url]["posts"].append(post.get("url", ""))
+        
+        # Group by platform and rank by frequency
+        for url, data in all_links.items():
+            platform = data["platform"]
+            
+            if platform not in link_map:
+                link_map[platform] = {
+                    "urls": [],
+                    "count": 0,
+                    "confidence": 0.0
+                }
+            
+            link_map[platform]["urls"].append(url)
+            link_map[platform]["count"] += data["count"]
+        
+        # Calculate confidence scores
+        for platform, data in link_map.items():
+            if data["count"] >= 2:
+                data["confidence"] = 0.9  # Multiple mentions = high confidence
+            elif data["count"] == 1:
+                data["confidence"] = 0.6  # Single mention = medium confidence
+            else:
+                data["confidence"] = 0.3
+            
+            # Deduplicate URLs
+            data["urls"] = list(set(data["urls"]))
+        
+        return link_map if link_map else {}

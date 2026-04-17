@@ -146,6 +146,13 @@ class IntelAgent:
             "identity": identity,
             "photo_url": identity.get("photo_url"),
             "linkedin_handle": identity.get("handle"),
+            "twitter_url": identity.get("twitter"),
+            "github_url": identity.get("github"),
+            "personal_site_url": identity.get("personal_site"),
+            "instagram_url": identity.get("instagram"),
+            "email": identity.get("email"),
+            "email_source": identity.get("email_source"),
+            "email_variants": identity.get("email_variants", []),
             "who_they_are": parsed.get("WHO_THEY_ARE", "[Not found in research]"),
             "what_they_care_about": self._parse_list(
                 parsed.get("WHAT_THEY_CARE_ABOUT", "")
