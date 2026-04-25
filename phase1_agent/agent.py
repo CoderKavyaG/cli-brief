@@ -112,8 +112,16 @@ class IntelAgent:
         """Synthesize briefing using Groq (primary) with Gemini fallback"""
         
         has_research = len(research_text.strip()) > 300
-        confidence = "HIGH" if len(research_text) > 3000 else \
-                    "MEDIUM" if len(research_text) > 500 else "LOW"
+        
+        # Smart confidence score based on identity lock and number of verified sources
+        if identity.get("verified") and len(sources) >= 3:
+            confidence = "HIGH"
+        elif identity.get("verified") or len(sources) >= 2:
+            confidence = "MEDIUM"
+        elif has_research:
+            confidence = "LOW"
+        else:
+            confidence = "VERY LOW"
         
         # Build prompt for synthesis
         prompt = self._build_synthesis_prompt(name, role, company, context, research_text, has_research)
@@ -186,35 +194,35 @@ RESEARCH DATA (use ONLY this information — no prior knowledge or training data
 
 YOUR TASK: Write a complete, verified executive briefing using ONLY the research above.
 
-CRITICAL RULES:
-1. Every sentence must be COMPLETE — never cut off mid-thought
-2. Use ONLY facts from the research data above
-3. After each specific fact, write the source domain like [domain.com]
-4. If you cannot find data for a section, write exactly: [Not found in research]
-5. Never use information about other people — ONLY {name}
-6. Smart questions must reference specific things you found in research
-7. Icebreaker must reference ONE specific real thing from the research
-8. End every section with a period
+CRITICAL RULES FOR CONFIDENCE AND ACCURACY:
+1. Every sentence must be COMPLETE — never cut off mid-thought.
+2. Use ONLY facts from the research data above. Do NOT hallucinate. Do NOT use general knowledge. If the research data does not contain the answer, you MUST write "[Not found in research]".
+3. You MUST cite your source at the end of EVERY sentence containing a fact. Use the exact domain provided in the RESEARCH DATA. For example: "Ishan is the CEO of InTheBox [linkedin.com]." or "He recently published a paper on AI [github.com]."
+4. If you cannot find data for a section, write exactly: "[Not found in research]"
+5. Never use information about other people — ONLY {name}. Double-check names before writing.
+6. Smart questions must reference specific things you found in research, with a citation.
+7. Icebreaker must reference ONE specific real thing from the research, with a citation.
+8. End every section with a period.
 
 WRITE IN THIS FORMAT (complete each section fully):
 
 WHO_THEY_ARE:
-[2-3 complete sentences about {name} as a real person. Include their background, role, and what makes them unique. End with a period.]
+[2-3 complete sentences about {name} as a real person. Include their background, role, and what makes them unique. End with a period. CITATION IN EVERY SENTENCE.]
 
 WHAT_THEY_CARE_ABOUT:
-[Write 4 bullet points. Each point should be a complete sentence with a specific thing they care about, based on research. Include source domains.]
+[Write 4 bullet points. Each point should be a complete sentence with a specific thing they care about, based on research. CITATION AT THE END OF EVERY BULLET.]
 
 COMPANY_SITUATION:
-[2-3 complete sentences about {company}. Include specific numbers, status, recent announcements if found. End with a period.]
+[2-3 complete sentences about {company}. Include specific numbers, status, recent announcements if found. End with a period. CITATION IN EVERY SENTENCE.]
 
 MEETING_APPROACH:
-[3 specific tactical tips for approaching THIS meeting about "{context}". Each tip must be a complete sentence based on research findings. End with periods.]
+[3 specific tactical tips for approaching THIS meeting about "{context}". Each tip must be a complete sentence based on research findings. End with periods. CITATION AT THE END OF EVERY TIP.]
 
 SMART_QUESTIONS:
-[Write 3 numbered questions. Each must be specific and personalized based on research. No generic questions. Each ends with ?]
+[Write 3 numbered questions. Each must be specific and personalized based on research. No generic questions. Each ends with ? CITATION AFTER EVERY QUESTION.]
 
 ICEBREAKER:
-[One specific, genuine thing from research that shows you've done homework. Quote something real or reference a specific achievement. Must be engaging and end with ? or !]
+[One specific, genuine thing from research that shows you've done homework. Quote something real or reference a specific achievement. Must be engaging and end with ? or ! CITATION AT THE END.]
 
 Now write the complete briefing. Do not truncate. Do not use template language."""
 

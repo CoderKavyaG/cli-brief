@@ -155,15 +155,15 @@ class Researcher:
                         print(f"[LINKEDIN FOUND UNVERIFIED] @{handle} - will verify via deep linking")
                         linkedin_found = True
                         break
+                    
+                    # Try /posts/handle pattern if not an /in/ URL
+                    handle = None
+                    match = re.search(r'/posts/([a-zA-Z0-9_-]+)_', r["url"])
                     if match:
                         handle = match.group(1)
-                    else:
-                        # Try /posts/handle pattern
-                        match = re.search(r'/posts/([a-zA-Z0-9_-]+)_', r["url"])
-                        if match:
-                            handle = match.group(1)
                     
                     # If we got a handle and name/company match, accept it
+                    search_content = r.get("content", "").lower()
                     if handle and (name_parts[0].lower() in search_content and company_lower in search_content):
                         identity["handle"] = handle
                         identity["linkedin_url"] = r["url"]
@@ -345,27 +345,35 @@ class Researcher:
         
         print(f"[TIER 2] Scraping {len(scrape_tasks)} URLs sequentially...")
         
-        # EXECUTE SCRAPING
+        # EXECUTE SCRAPING CONCURRENTLY
         scrape_results = {}
-        for source_type, url, scraper_func in scrape_tasks:
+        import concurrent.futures
+        
+        def run_scrape(task):
+            source_type, url, scraper_func = task
             try:
                 print(f"[SCRAPE] {source_type}: {url[:60]}...")
                 content = scraper_func(url)
-                
-                scrape_results[source_type] = {
+                print(f"  [OK] {source_type} Got {len(content) if content else 0} chars")
+                return source_type, {
                     "url": url,
                     "content": content,
                     "status": "success" if content else "empty"
                 }
-                print(f"  [OK] Got {len(content) if content else 0} chars")
-                
             except Exception as e:
-                print(f"  [ERROR] {str(e)[:60]}")
-                scrape_results[source_type] = {
+                print(f"  [ERROR] {source_type} {str(e)[:60]}")
+                return source_type, {
                     "url": url,
                     "content": "",
                     "status": "failed"
                 }
+
+        print(f"[TIER 2] Scraping {len(scrape_tasks)} URLs concurrently...")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(run_scrape, task) for task in scrape_tasks]
+            for future in concurrent.futures.as_completed(futures):
+                source_type, result = future.result()
+                scrape_results[source_type] = result
         
         # EXTRACT LINKS FROM POSTS - Discover other platforms
         print(f"\n[POST LINK EXTRACTION] Starting post scraping for link discovery...")
